@@ -387,4 +387,25 @@ const handleCancel = () => {
     background-color: #6c757d;
     color: white;
 }
+
+/* Table styles for markdown-body */
+:deep(.markdown-body table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  display: block;
+  overflow-x: auto;
+}
+
+:deep(.markdown-body th),
+:deep(.markdown-body td) {
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+:deep(.markdown-body th) {
+  background-color: #f8f8f8;
+  font-weight: bold;
+}
 </style>
