@@ -210,9 +210,9 @@ const generateImage = async () => {
       contentHtml += `<div style="margin-bottom: 30px;">`; // Increased spacing for the whole turn
       if (selection.question && turn.question) {
         contentHtml += `<div style="background-color: #e9ecef; padding: 10px; border-radius: 5px; margin-bottom: 10px; display: flex; align-items: flex-start;">`;
-        if (turn.questionNumber > 0) {
+        if (turn.questionNumber > 0 && selectedRenderedTurns.length > 1) {
             // Replicate the .question-number styling for the generated image
-            contentHtml += `<span style="background-color: #f1f3f5; border: 1px solid #dee2e6; border-radius: 50%; color: #495057; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; height: 24px; width: 24px; flex-shrink: 0; margin-right: 8px; /* Slightly increased margin for better spacing */">${turn.questionNumber}.</span>`;
+            contentHtml += `<span style="background-color: #f1f3f5; border: 1px solid #dee2e6; border-radius: 50%; color: #495057; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; height: 24px; width: 24px; flex-shrink: 0; margin-right: 8px; /* Slightly increased margin for better spacing */">${turn.questionNumber}</span>`;
         }
         contentHtml += `<div style="flex-grow: 1; font-size: 1.3rem;">${turn.question}</div></div>`;
       }
@@ -242,7 +242,7 @@ const generateImage = async () => {
     const dataUrl = await toPng(element, {
       cacheBust: true,
       skipAutoScale: true,
-      pixelRatio: window.devicePixelRatio * 2 || 2, // Attempt to double the pixel ratio for higher resolution
+      pixelRatio: 3, // A pixelRatio of 2 provides good clarity without excessively large file sizes
       // No explicit width/height here, let html-to-image calculate based on element's rendered size
     });
     const link = document.createElement('a');
@@ -258,6 +258,39 @@ const generateImage = async () => {
   }
 };
 
+const isAllSelected = computed(() => {
+  // Check if all available turns in renderedConversation are fully selected (Q&A)
+  if (renderedConversation.value.length === 0) return false;
+
+  return renderedConversation.value.every(turn => {
+    const selection = getTurnSelection(turn.index);
+    const hasQuestion = turn.question && turn.question.trim().length > 0;
+
+    if (!selection) return false; // If no selection entry, not selected
+
+    if (hasQuestion) {
+      return selection.question && selection.answer;
+    } else {
+      // If no question, only answer needs to be selected
+      return selection.answer;
+    }
+  });
+});
+
+const handleSelectAll = () => {
+  if (isAllSelected.value) {
+    // If all are selected, deselect all
+    selectionState.value = [];
+  } else {
+    // Select all turns (question and answer)
+    selectionState.value = renderedConversation.value.map(turn => ({
+      index: turn.index,
+      question: turn.question && turn.question.trim().length > 0, // Only select question if it exists
+      answer: true,
+    }));
+  }
+};
+
 watch(() => props.fileHandle, loadConversation, { immediate: true });
 </script>
 
@@ -265,7 +298,10 @@ watch(() => props.fileHandle, loadConversation, { immediate: true });
   <div class="conversation-viewer">
     <div class="viewer-header">
       <h2>{{ formattedFileName }}</h2>
-      <button @click="generateImage" :disabled="selectionState.length === 0">分享</button>
+      <div style="display: flex; gap: 10px;">
+        <button @click="handleSelectAll">全选</button>
+        <button @click="generateImage" :disabled="selectionState.length === 0">分享</button>
+      </div>
     </div>
     <div class="viewer-content">
       <div v-if="isLoading" class="status-message">正在加载对话...</div>
@@ -551,5 +587,25 @@ watch(() => props.fileHandle, loadConversation, { immediate: true });
 .markdown-body pre code {
   background: none;
   padding: 0;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  display: block; /* Ensure table can scroll horizontally if needed */
+  overflow-x: auto; /* Ensure table can scroll horizontally if needed */
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background-color: #f8f8f8;
+  font-weight: bold;
 }
 </style>

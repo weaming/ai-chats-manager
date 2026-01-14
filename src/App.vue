@@ -59,7 +59,7 @@ const stopResizing = () => {
 <template>
   <div id="app" :class="{ 'is-resizing': isResizing }">
     <header class="app-header">
-      <h1>Gemini 分享图生成器</h1>
+      <h1>AI对话管理</h1>
       <button @click="showNewConversation" class="new-btn">新建对话</button>
     </header>
     <main class="app-container">
