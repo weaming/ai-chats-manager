@@ -45,6 +45,8 @@ const emit = defineEmits<{
     (e: 'edit-cancel'): void;
     (e: 'edit-save', payload: { question: string | null; answer: string }): void;
     (e: 'delete'): void;
+    (e: 'move-up'): void;
+    (e: 'move-down'): void;
 }>();
 
 const draftQuestion = ref<string>('');
@@ -134,6 +136,8 @@ const handleCancel = () => {
             <template v-if="!isEditing">
                 <span v-if="layoutMode === 'default' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
                 <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+                <button class="move-btn move-up-btn" @click.stop="$emit('move-up')" title="上移">⬆️</button>
+                <button class="move-btn move-down-btn" @click.stop="$emit('move-down')" title="下移">⬇️</button>
                 <button class="delete-btn" @click.stop="$emit('delete')" title="删除此回合">🗑️</button>
             </template>
         </div>
@@ -228,6 +232,27 @@ const handleCancel = () => {
 
 .edit-btn:hover {
   color: var(--primary-color);
+}
+
+.move-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 3px 0;
+  margin-top: 3px;
+  color: #6c757d;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.chat-turn:hover .move-btn {
+  opacity: 1;
+}
+
+.move-btn:hover {
+  color: var(--primary-color);
+  transform: scale(1.2);
 }
 
 .delete-btn {

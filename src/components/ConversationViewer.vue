@@ -253,6 +253,74 @@ const deleteTurn = async (index: number) => {
     }
 };
 
+const moveUp = async (index: number) => {
+    if (index === 0) return;
+    
+    // 保存当前滚动位置
+    const container = document.querySelector('.viewer-content');
+    const scrollTop = container?.scrollTop || 0;
+    
+    const newConversation = [...conversation.value];
+    const item = newConversation[index]!;
+    newConversation.splice(index, 1);
+    newConversation.splice(index - 1, 0, item);
+    
+    // 不设置 isLoading,避免触发界面重新渲染导致滚动重置
+    error.value = null;
+    try {
+        // 先更新本地状态,实现即时响应
+        conversation.value = newConversation;
+        
+        // 恢复滚动位置
+        await nextTick();
+        if (container) {
+            container.scrollTop = scrollTop;
+        }
+        
+        // 后台保存到文件系统
+        await updateConversation(props.fileHandle, newConversation);
+    } catch (e) {
+        console.error("上移失败:", e);
+        error.value = e instanceof Error ? e.message : '上移时发生未知错误。';
+        // 如果保存失败,重新加载以恢复正确状态
+        await loadConversation();
+    }
+};
+
+const moveDown = async (index: number) => {
+    if (index >= conversation.value.length - 1) return;
+    
+    // 保存当前滚动位置
+    const container = document.querySelector('.viewer-content');
+    const scrollTop = container?.scrollTop || 0;
+    
+    const newConversation = [...conversation.value];
+    const item = newConversation[index]!;
+    newConversation.splice(index, 1);
+    newConversation.splice(index + 1, 0, item);
+    
+    // 不设置 isLoading,避免触发界面重新渲染导致滚动重置
+    error.value = null;
+    try {
+        // 先更新本地状态,实现即时响应
+        conversation.value = newConversation;
+        
+        // 恢复滚动位置
+        await nextTick();
+        if (container) {
+            container.scrollTop = scrollTop;
+        }
+        
+        // 后台保存到文件系统
+        await updateConversation(props.fileHandle, newConversation);
+    } catch (e) {
+        console.error("下移失败:", e);
+        error.value = e instanceof Error ? e.message : '下移时发生未知错误。';
+        // 如果保存失败,重新加载以恢复正确状态
+        await loadConversation();
+    }
+};
+
 const renderedConversation = computed(() => {
   let questionCounter = 0;
   return conversation.value.map((turn, index) => {
@@ -458,6 +526,8 @@ onUnmounted(() => {
           @edit-cancel="cancelEditing"
           @edit-save="(payload) => saveEditing(index, payload)"
           @delete="deleteTurn(index)"
+          @move-up="moveUp(index)"
+          @move-down="moveDown(index)"
           
           @dragstart="handleTurnDragStart($event, index)"
           @dragover="handleDragOver($event, index)"

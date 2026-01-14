@@ -109,13 +109,20 @@ const stopResizing = () => {
 }
 
 html, body {
-  height: 100%;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
   overflow: hidden; /* Prevent body scroll */
+  position: fixed; /* 强制固定,防止任何滚动 */
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  margin: 0;
   background-color: var(--background-color);
   color: var(--text-color);
 }
