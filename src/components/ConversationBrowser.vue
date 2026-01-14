@@ -16,17 +16,79 @@ const props = defineProps({
 const { 
     rootHandle, listDirectory, selectDirectory, 
     deleteConversation, renameConversation, createDirectory, 
-    deleteDirectory, renameDirectory, moveConversation 
+    deleteDirectory, renameDirectory, moveConversation, mergeConversations,
+    readConversation, updateConversation
 } = useFileSystem();
 const emitter = useEventBus();
 const fileTree = ref<FileSystemEntry[]>([]);
 const isLoading = ref(false);
-const emit = defineEmits(['file-click']);
+const emit = defineEmits(['file-click', 'file-deleted']);
 const isDragOverRoot = ref(false);
 
 const { sourceParentHandle: dragSourceParentHandle } = useDragDrop();
 
 const chatsDirHandle = ref<FileSystemDirectoryHandle | null>(null);
+const isSelectionMode = ref(false);
+
+interface SelectedFile extends FileEntry {
+    parentHandle: FileSystemDirectoryHandle | null;
+    path: string;
+}
+const selectedFilesToMerge = ref<SelectedFile[]>([]);
+
+const selectionOrder = computed(() => {
+    const order: Record<string, number> = {};
+    selectedFilesToMerge.value.forEach((file, index) => {
+        order[file.name] = index + 1;
+    });
+    return order;
+});
+
+const toggleSelectionMode = () => {
+    isSelectionMode.value = !isSelectionMode.value;
+    selectedFilesToMerge.value = [];
+    if (isSelectionMode.value) {
+        // If we have a currently selected file (props.selectedFile), 
+        // maybe add it as the first one?
+        // Let's decide NOT to auto-select, to avoid confusion.
+        // User starts fresh.
+    }
+};
+
+const handleMerge = async () => {
+    if (selectedFilesToMerge.value.length < 2) return;
+    if (!chatsDirHandle.value) return;
+
+    if (!confirm(`确定要将 ${selectedFilesToMerge.value.length - 1} 个对话合并到 "${selectedFilesToMerge.value[0]!.name}" 吗？\n被合并的源文件将被删除。`)) {
+        return;
+    }
+
+    try {
+        const target = selectedFilesToMerge.value[0]!;
+        const sources = selectedFilesToMerge.value.slice(1);
+        
+        await mergeConversations(
+            target.handle, 
+            sources.map(f => ({ handle: f.handle, parentHandle: f.parentHandle || chatsDirHandle.value! }))
+        );
+        
+        
+        const targetPath = target.path; // Store before reset
+
+        // After merge, reset selection mode
+        isSelectionMode.value = false;
+        selectedFilesToMerge.value = [];
+        
+        // alert('合并成功！'); // Removed as requested
+        
+        // Auto-open the merged file
+        emit('file-click', { entry: target, path: targetPath, parentHandle: target.parentHandle });
+
+    } catch (e) {
+        console.error("合并失败", e);
+        alert(`合并失败: ${(e as Error).message}`);
+    }
+};
 
 watch(rootHandle, async () => {
     if (!rootHandle.value) {
@@ -59,8 +121,19 @@ const loadFileTree = async () => {
   }
 };
 
-const handleFileClick = (event: { entry: FileEntry, path: string }) => {
-  emit('file-click', event);
+const handleFileClick = (event: { entry: FileEntry, path: string, parentHandle: FileSystemDirectoryHandle | null }) => {
+  if (isSelectionMode.value) {
+      const index = selectedFilesToMerge.value.findIndex(f => f.name === event.entry.name);
+      if (index !== -1) {
+          // Deselect
+          selectedFilesToMerge.value.splice(index, 1);
+      } else {
+          // Select
+          selectedFilesToMerge.value.push({ ...event.entry, parentHandle: event.parentHandle, path: event.path });
+      }
+  } else {
+      emit('file-click', event);
+  }
 };
 
 const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEntry; parentHandle: FileSystemDirectoryHandle | null }) => {
@@ -76,6 +149,12 @@ const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEnt
 
         if (entry.kind === 'file') {
             await deleteConversation(entry.handle, resolvedParentHandle);
+            // Check if we deleted the currently selected file. 
+            // Props update is reactive, but we can emit event.
+            // Actually, we should check if the deleted entry matches props.selectedFile
+            if (props.selectedFile && props.selectedFile.name === entry.name) {
+                 emit('file-deleted');
+            }
         } else if (entry.kind === 'directory') {
             await deleteDirectory(entry.handle, resolvedParentHandle);
         }
@@ -133,6 +212,40 @@ const handleMoveEntry = async ({ sourceName, sourceParentHandle, targetDirHandle
     }
 };
 
+
+
+const handleTurnDrop = async ({ targetEntry, turnData, sourceIndices }: { targetEntry: FileEntry; turnData: any[]; sourceIndices?: number[] }) => {
+    try {
+        // ... (existing logic)
+        // Read target file
+        const conversation = await readConversation(targetEntry.handle);
+        // Append new turns
+        if (Array.isArray(turnData)) {
+             conversation.push(...turnData);
+        } else {
+             // Fallback if legacy logic somehow fires
+             conversation.push(turnData);
+        }
+        
+        // Save
+        await updateConversation(targetEntry.handle, conversation);
+        
+        // Notify success to trigger source removal
+        emitter.$emit('turn-transfer-complete', { sourceIndices });
+        
+        // alert(`已移动到 "${targetEntry.name}"`); // Optional feedback
+        // Refresh if we are viewing the target? Handled by file system watcher if we had one, or manual reload.
+        // If target is current file, Viewer handles it via load?
+        // Actually Viewer watches fileHandle. If we write to it, fileHandle doesn't change, but data does.
+        // If we are moving TO current file, we should reload.
+        // But drag usually implies FROM source.
+        
+    } catch (e) {
+        console.error("Failed to move turn", e);
+        alert("移动失败: " + (e as Error).message);
+    }
+};
+
 const handleRootDragOver = (event: DragEvent) => {
     event.preventDefault();
     if (dragSourceParentHandle.value) {
@@ -141,18 +254,15 @@ const handleRootDragOver = (event: DragEvent) => {
 };
 
 const handleRootDragLeave = (event: DragEvent) => {
-    // Only set to false if we are leaving the container, not entering a child
-    if (event.currentTarget === event.target) {
-         isDragOverRoot.value = false;
+    // Check if we are really leaving the container
+    const currentTarget = event.currentTarget as HTMLElement;
+    const relatedTarget = event.relatedTarget as HTMLElement;
+
+    if (currentTarget.contains(relatedTarget)) {
+        // We are entering a child element, do not disable drag over
+        return;
     }
-};
-// Use dragleave on the container with a check or just simple toggle for now. 
-// Actually, detailed drag leave logic on containers with children is tricky.
-// Simplified: Just set false. If it flickers, we can refine.
-// Better approach for container: 
-// The `dragleave` fires when entering a child. 
-// A common fix is using a counter or checking `relatedTarget`.
-const handleRootDragLeaveSimple = () => {
+    
     isDragOverRoot.value = false;
 };
 
@@ -199,6 +309,12 @@ watch(rootHandle, loadFileTree, { immediate: true });
     <div class="header">
       <h2>对话列表</h2>
       <div class="header-actions">
+        <button @click="toggleSelectionMode" :class="{ active: isSelectionMode }" title="多选模式" style="font-size: 1rem;">
+             {{ isSelectionMode ? '取消多选' : '多选' }}
+        </button>
+        <button v-if="isSelectionMode" @click="handleMerge" :disabled="selectedFilesToMerge.length < 2" title="合并" style="font-size: 1rem;">
+            合并 ({{ selectedFilesToMerge.length }})
+        </button>
         <button @click="handleCreateDirectory" :disabled="!rootHandle" title="新建文件夹">📁+</button>
       </div>
     </div>
@@ -214,7 +330,7 @@ watch(rootHandle, loadFileTree, { immediate: true });
       class="file-list-container"
       :class="{ 'drop-target': isDragOverRoot }"
       @dragover="handleRootDragOver"
-      @dragleave="handleRootDragLeaveSimple"
+      @dragleave="handleRootDragLeave"
       @drop="handleRootDrop"
     >
       <div v-if="!rootHandle" class="placeholder">
@@ -232,10 +348,12 @@ watch(rootHandle, loadFileTree, { immediate: true });
         :parent-handle="chatsDirHandle"
         :selected-file="selectedFile"
         path=""
+        :selection-order="selectionOrder"
         @file-click="handleFileClick"
-        @delete-entry="handleDeleteEntry" 
+        @delete-entry="handleDeleteEntry"
         @rename-entry="handleRenameEntry"
         @move-entry="handleMoveEntry"
+        @turn-drop="handleTurnDrop"
       />
     </div>
   </div>
@@ -305,6 +423,11 @@ h2 {
 
 .directory-selection-controls button:hover {
   background-color: #0056b3;
+}
+
+.header-actions button.active {
+    color: var(--primary-color);
+    font-weight: bold;
 }
 
 .file-list-container {

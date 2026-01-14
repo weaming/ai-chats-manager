@@ -213,10 +213,50 @@ export function useFileSystem() {
     }
   };
 
+  const findLatestFile = async (): Promise<{ entry: FileEntry, path: string } | null> => {
+      await initializationPromise;
+      if (!rootHandle.value) return null;
+
+      let latestFile: { entry: FileEntry, path: string, time: number } | null = null;
+      
+      const scanDir = async (dirHandle: FileSystemDirectoryHandle, currentPath: string) => {
+          for await (const entry of dirHandle.values()) {
+              if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+                  const file = await (entry as FileSystemFileHandle).getFile();
+                  if (!latestFile || file.lastModified > latestFile.time) {
+                      latestFile = { 
+                          entry: { name: entry.name, kind: 'file', handle: entry as FileSystemFileHandle },
+                          path: currentPath ? `${currentPath}/${entry.name}` : entry.name,
+                          time: file.lastModified
+                      };
+                  }
+              } else if (entry.kind === 'directory') {
+                   const subPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+                   await scanDir(entry as FileSystemDirectoryHandle, subPath);
+              }
+          }
+      };
+
+      try {
+           const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats', { create: true });
+           await scanDir(chatsDirHandle, '');
+           if (latestFile) {
+               // Verify type is not narrowed to never
+               const found: { entry: FileEntry, path: string, time: number } = latestFile; 
+               return { entry: found.entry, path: found.path };
+           }
+           return null;
+      } catch (e) {
+          console.error("Error finding latest file:", e);
+          return null;
+      }
+  };
+
   return {
     rootHandle: readonly(rootHandle),
     selectDirectory,
     listDirectory,
+    findLatestFile,
     createDirectory,
     deleteDirectory,
     renameDirectory,

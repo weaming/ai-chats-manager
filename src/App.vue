@@ -9,7 +9,7 @@ import { useFileSystem } from './composables/useFileSystem';
 const selectedFile = ref<FileEntry | null>(null);
 const sidebarWidth = ref(550);
 const isResizing = ref(false);
-const { findFileByPath } = useFileSystem();
+const { findFileByPath, findLatestFile } = useFileSystem();
 
 const handleFileSelected = (event: { entry: FileEntry, path: string }) => {
   selectedFile.value = event.entry;
@@ -21,6 +21,23 @@ const showNewConversation = () => {
   localStorage.removeItem('lastSelectedFile');
 };
 
+const autoSelectLatest = async () => {
+    const latest = await findLatestFile();
+    if (latest) {
+        selectedFile.value = latest.entry;
+        localStorage.setItem('lastSelectedFile', latest.path);
+    } else {
+        selectedFile.value = null; // New Conversation Mode
+        localStorage.removeItem('lastSelectedFile');
+    }
+};
+
+const handleConversationDeleted = async () => {
+    // Current file was deleted (triggered by ConversationBrowser)
+    // We should auto-select the latest remaining file
+    await autoSelectLatest();
+};
+
 onMounted(async () => {
   const lastSelectedPath = localStorage.getItem('lastSelectedFile');
   if (lastSelectedPath) {
@@ -28,10 +45,12 @@ onMounted(async () => {
     if (file) {
       selectedFile.value = file;
     } else {
-      // If the file is not found, it might be because the path is incorrect
-      // or the file was deleted. We remove the entry from local storage.
-      localStorage.removeItem('lastSelectedFile');
+      // Path invalid or file deleted, auto-select latest
+      await autoSelectLatest();
     }
+  } else {
+      // No memory, auto-select latest
+      await autoSelectLatest();
   }
 });
 
@@ -64,7 +83,11 @@ const stopResizing = () => {
     </header>
     <main class="app-container">
       <div class="sidebar" :style="{ width: sidebarWidth + 'px' }">
-        <ConversationBrowser @file-click="handleFileSelected" :selected-file="selectedFile" />
+        <ConversationBrowser 
+            @file-click="handleFileSelected" 
+            @file-deleted="handleConversationDeleted"
+            :selected-file="selectedFile" 
+        />
       </div>
       <div class="resizer" @mousedown="startResizing"></div>
       <div class="main-content">

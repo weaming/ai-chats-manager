@@ -32,6 +32,34 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
         }
     };
 
+    // Helper: Check if a markdown file is referenced by ANY other chat JSON file
+    const isMarkdownReferenced = async (answerId: string, excludeFileName: string): Promise<boolean> => {
+        if (!rootHandle.value) return false;
+        try {
+            const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats');
+            for await (const entry of chatsDirHandle.values()) {
+                if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+                    // Skip the file currently being modified/deleted
+                    if (entry.name === excludeFileName) continue;
+
+                    const file = await (entry as FileSystemFileHandle).getFile();
+                    const content = await file.text();
+                    
+                    // Optimization: Simple string check first (faster than parsing)
+                    // answer_id is stored in JSON as "answer_id": "..."
+                    // We can check if the string answerId appears.
+                    // To be safe, look for `"${answerId}"` to avoid partial matches (e.g. "1-abc" inside "11-abc")
+                    if (content.includes(`"${answerId}"`)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Error checking references:", e);
+        }
+        return false;
+    };
+
     const saveConversation = async (conversationTurns: { question: string | null; answer: string }[]): Promise<FileEntry | null> => {
         if (!rootHandle.value) {
             throw new Error('请先选择一个用于保存对话的根目录。');
@@ -61,8 +89,10 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             const minutes = date.getMinutes().toString().padStart(2, '0');
             const timestamp = `${year}${month}${day}-${hours}${minutes}`;
 
-            const uuid = crypto.randomUUID();
-            const jsonFileName = `${timestamp}-${uuid}.json`;
+            // Generate a shorter unique ID (8 chars) instead of full UUID
+            // timestamp provides rough ordering, this provides uniqueness collision resistance
+            const shortId = Math.random().toString(36).substring(2, 10);
+            const jsonFileName = `${timestamp}-${shortId}.json`;
             const jsonFileHandle = await chatsDirHandle.getFileHandle(jsonFileName, { create: true });
             const writable = await jsonFileHandle.createWritable();
             await writable.write(JSON.stringify(conversationJson, null, 2));
@@ -88,9 +118,15 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             if (markdownDirHandle && Array.isArray(chatData)) {
                 for (const turn of chatData) {
                     try {
+                        // Check if referenced by others
+                        if (await isMarkdownReferenced(turn.answer_id, chatFileHandle.name)) {
+                            console.log(`Skipping deletion of referenced markdown: ${turn.answer_id}.md`);
+                            continue;
+                        }
+                        
                         await markdownDirHandle.removeEntry(`${turn.answer_id}.md`);
                     } catch (e) {
-                        console.warn(`无法删除 Markdown 文件 ${turn.answer_id}.md (可能已被删除):`, e);
+                         // Ignore if file doesn't exist
                     }
                 }
             }
@@ -166,10 +202,16 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             for (const oldId of oldAnswerIds) {
                 if (!newAnswerIds.has(oldId)) {
                     try {
+                        // Check if referenced by others
+                        if (await isMarkdownReferenced(oldId, chatFileHandle.name)) {
+                             console.log(`Skipping deletion of referenced markdown: ${oldId}.md`);
+                             continue;
+                        }
+
                         await markdownDirHandle.removeEntry(`${oldId}.md`);
                         console.log(`Deleted stale markdown file: ${oldId}.md`);
                     } catch (e) {
-                        console.warn(`无法删除旧的 Markdown 文件 ${oldId}.md (可能已被新的替换或手动删除):`, e);
+                         // Ignore error
                     }
                 }
             }
@@ -187,11 +229,48 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
         }
     };
 
+    const mergeConversations = async (targetHandle: FileSystemFileHandle, sources: { handle: FileSystemFileHandle, parentHandle: FileSystemDirectoryHandle }[]) => {
+        if (!rootHandle.value) throw new Error("无法合并，因为未选择根目录。");
+
+        try {
+            // 1. Read the target conversation
+            const targetFile = await targetHandle.getFile();
+            let targetData = JSON.parse(await targetFile.text());
+            if (!Array.isArray(targetData)) targetData = [];
+
+            // 2. Read and append source conversations
+            for (const source of sources) {
+                const sourceFile = await source.handle.getFile();
+                const sourceData = JSON.parse(await sourceFile.text());
+                if (Array.isArray(sourceData)) {
+                    targetData = targetData.concat(sourceData);
+                }
+            }
+
+            // 3. Save the merged conversation back to the target file
+            const writable = await targetHandle.createWritable();
+            await writable.write(JSON.stringify(targetData, null, 2));
+            await writable.close();
+
+            // 4. Delete source files
+            for (const source of sources) {
+                 await source.parentHandle.removeEntry(source.handle.name);
+            }
+
+            emitter.$emit('file-system-changed'); 
+        } catch (error) {
+            console.error('合并对话失败:', error);
+            throw new Error('合并对话时发生错误。');
+        }
+    };
+
     return {
         readConversation,
         saveConversation,
         deleteConversation,
         renameConversation,
-        updateConversation
+        updateConversation,
+        mergeConversations
     };
+
 }

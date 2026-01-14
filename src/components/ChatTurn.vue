@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from 'vue';
 import type { PropType } from 'vue';
 import type { FullConversationTurn } from '../composables/useFileSystem';
+import { useDragDrop } from '../composables/useDragDrop';
 
 interface SelectionState {
     question: boolean;
@@ -39,9 +40,10 @@ const emit = defineEmits<{
     (e: 'edit-start'): void;
     (e: 'edit-cancel'): void;
     (e: 'edit-save', payload: { question: string | null; answer: string }): void;
+    (e: 'delete'): void;
 }>();
 
-const draftQuestion = ref<string | null>(null);
+const draftQuestion = ref<string>('');
 const draftAnswer = ref('');
 const minHeight = ref(0);
 const rootEl = ref<HTMLElement | null>(null);
@@ -53,12 +55,53 @@ watch(() => props.isEditing, async (newVal) => {
         if (rootEl.value) {
             minHeight.value = rootEl.value.offsetHeight;
         }
-        draftQuestion.value = props.rawTurn.question;
+        draftQuestion.value = props.rawTurn.question || '';
         draftAnswer.value = props.rawTurn.answer;
     } else {
         minHeight.value = 0;
     }
 });
+
+const { draggedTurnState } = useDragDrop();
+
+// --- Drag and Drop ---
+const handleDragStart = (event: DragEvent) => {
+    if (props.isEditing) {
+        event.preventDefault();
+        return;
+    }
+    
+    // Parent handles setting global state (draggedTurnState) and dataTransfer data
+    // based on selection. We just handle the visual drag image here.
+
+    if (event.dataTransfer) {
+        // Fallback effect
+        event.dataTransfer.effectAllowed = 'move';
+        
+        // Custom Drag Image (Question Bubble Only)
+        const questionBubble = rootEl.value?.querySelector('.chat-bubble.question') as HTMLElement;
+        const answerBubble = rootEl.value?.querySelector('.chat-bubble.answer') as HTMLElement;
+        const dragTarget = questionBubble || answerBubble;
+
+        if (dragTarget) {
+            event.dataTransfer.setDragImage(dragTarget, 0, 0);
+        }
+    }
+    
+    // Visual feedback
+    if (rootEl.value) {
+        rootEl.value.classList.add('dragging');
+    }
+};
+
+const handleDragEnd = () => {
+    if (rootEl.value) {
+        rootEl.value.classList.remove('dragging');
+    }
+    // Always clear global state on drag end to prevent stuck state
+    draggedTurnState.value = null;
+};
+
 
 const handleSave = () => {
     emit('edit-save', {
@@ -73,12 +116,19 @@ const handleCancel = () => {
 </script>
 
 <template>
-    <div class="chat-turn" ref="rootEl">
+    <div 
+        class="chat-turn" 
+        ref="rootEl"
+        :draggable="!isEditing"
+        @dragstart="handleDragStart"
+        @dragend="handleDragEnd"
+    >
         <!-- Left Column: Controls -->
         <div class="turn-controls">
             <template v-if="!isEditing">
                 <span v-if="turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
-                <button v-if="turn.questionNumber > 0" class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+                <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+                <button class="delete-btn" @click.stop="$emit('delete')" title="删除此回合">🗑️</button>
             </template>
         </div>
 
@@ -86,7 +136,7 @@ const handleCancel = () => {
         <div class="turn-content">
             <!-- Viewing Mode -->
             <div v-if="!isEditing" @click="$emit('toggle-selection')">
-                <div v-if="turn.questionNumber > 0" class="chat-bubble question"
+                <div v-if="turn.question && turn.question.trim().length > 0" class="chat-bubble question"
                     @click.stop="$emit('toggle-question-selection')">
                     <div class="bubble-content" :class="{ active: selection?.question }">{{ turn.question }}</div>
                 </div>
@@ -98,13 +148,23 @@ const handleCancel = () => {
 
             <!-- Editing Mode -->
             <div v-else class="editing-view" :style="{ minHeight: minHeight + 'px' }">
-                <div v-if="draftQuestion !== null" class="editing-group">
+                <div class="editing-group">
                     <label>问题</label>
-                    <textarea v-model="draftQuestion" rows="3"></textarea>
+                    <textarea 
+                        v-model="draftQuestion" 
+                        rows="3"
+                        @keydown.meta.enter="handleSave"
+                        @keydown.ctrl.enter="handleSave"
+                    ></textarea>
                 </div>
                 <div class="editing-group answer-group">
                     <label>回答</label>
-                    <textarea v-model="draftAnswer" class="answer-textarea"></textarea>
+                    <textarea 
+                        v-model="draftAnswer" 
+                        class="answer-textarea"
+                        @keydown.meta.enter="handleSave"
+                        @keydown.ctrl.enter="handleSave"
+                    ></textarea>
                 </div>
                 <div class="editing-actions">
                     <button class="primary-btn" @click="handleSave">保存</button>
@@ -119,6 +179,10 @@ const handleCancel = () => {
 .chat-turn {
   display: flex;
   gap: 15px; /* Space between left and right columns */
+  transition: opacity 0.2s;
+}
+.chat-turn.dragging {
+    opacity: 0.4;
 }
 
 .turn-controls {
@@ -128,7 +192,7 @@ const handleCancel = () => {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start; /* Align to the top */
-  padding-top: 5px; /* Align with the top of the bubble */
+  padding-top: 15px; /* Align with the top of the bubble's first line of text (12px padding + 2px border + ~1px for visual centering) */
 }
 
 .turn-content {
@@ -143,9 +207,33 @@ const handleCancel = () => {
   padding: 5px 0;
   margin-top: 5px; /* Space between number and button */
   color: #6c757d;
+  opacity: 0;
+  transition: all 0.2s ease;
 }
+
+.chat-turn:hover .edit-btn {
+  opacity: 1;
+}
+
 .edit-btn:hover {
   color: var(--primary-color);
+}
+
+.delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 5px 0;
+  margin-top: 5px;
+  color: #dee2e6; /* Very light gray, almost invisible */
+  opacity: 0; /* Fully transparent by default */
+  transition: all 0.2s ease;
+}
+
+.chat-turn:hover .delete-btn {
+    opacity: 1; /* Show on hover */
+    color: #dc3545; /* Red on hover */
 }
 
 .chat-bubble {
