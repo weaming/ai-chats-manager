@@ -30,7 +30,7 @@ const scrollToBottom = async () => {
 const addTurn = () => {
   if (!currentAnswer.value.trim()) {
     alert('回答不能为空');
-    return;
+    return false;
   }
 
   conversationTurns.value.push({
@@ -43,16 +43,20 @@ const addTurn = () => {
   currentAnswer.value = '';
   
   scrollToBottom();
+  return true;
 };
 
 const completeConversation = async () => {
   // If there is content in inputs, ask to add it first
-  if (currentAnswer.value.trim() || currentQuestion.value.trim()) {
-      if (confirm('输入框中还有未添加的内容，是否将其添加到对话中？')) {
-          addTurn();
-      } else {
-        // User chose not to add, check if list is valid
-         if (conversationTurns.value.length === 0) return;
+  // Only prompt if there's actually something valid to add (at least an answer)
+  if (currentAnswer.value.trim()) {
+      if (confirm('输入内容尚未添加，是否先将其添加到对话中？')) {
+          if (!addTurn()) return; // Stop if adding failed
+      }
+  } else if (currentQuestion.value.trim()) {
+      // Just a question without answer, inform user or just continue if they have other turns
+      if (!confirm('检测到尚未填写的提问（回答为空），将放弃该提问并完成创建。继续吗？')) {
+          return;
       }
   }
 
@@ -64,7 +68,7 @@ const completeConversation = async () => {
   const newFile = await saveConversation(conversationTurns.value);
 
   if (newFile) {
-    emit('conversation-created', newFile);
+    emit('conversation-created', { entry: newFile, path: newFile.name });
     // Clear UI
     conversationTurns.value = [];
   }
@@ -82,8 +86,17 @@ const cancelEditing = () => {
 
 // ESC 键取消编辑
 const handleKeyDown = (event: KeyboardEvent) => {
+    // ESC to cancel editing a turn
     if (event.key === 'Escape' && editingTurn.value !== null) {
         cancelEditing();
+        return;
+    }
+
+    // Cmd + Shift + Enter to complete conversation
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        completeConversation();
     }
 };
 
@@ -280,12 +293,15 @@ const renderedTurns = computed(() => {
                 placeholder="AI 回答 (必填，支持 Markdown)" 
                 class="input-answer"
                 rows="4"
-                @keydown.meta.enter="addTurn"
-                @keydown.ctrl.enter="addTurn"
+                @keydown.meta.enter.exact.prevent="addTurn"
+                @keydown.ctrl.enter.exact.prevent="addTurn"
             ></textarea>
         </div>
         <div class="input-actions">
-             <span class="hint">Cmd/Ctrl + Enter 添加</span>
+             <div class="hints">
+                <div class="hint">Cmd/Ctrl + Enter 添加问答</div>
+                <div class="hint">Cmd/Ctrl + Shift + Enter 完成创建</div>
+             </div>
              <button class="add-btn" @click="addTurn" :disabled="!currentAnswer.trim()">添加</button>
         </div>
     </div>
@@ -481,8 +497,14 @@ textarea:focus {
 .input-actions {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
     margin-top: 10px;
+}
+
+.hints {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .hint {
@@ -688,6 +710,22 @@ textarea:focus {
 }
 .confirm-btn:hover {
     background-color: #0056b3;
+}
+
+.complete-hint-bar {
+    padding: 8px 20px;
+    background-color: #e9ecef;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: #6c757d;
+    text-align: right;
+}
+
+.complete-hint-bar code {
+    background-color: #dee2e6;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #495057;
 }
 
 </style>

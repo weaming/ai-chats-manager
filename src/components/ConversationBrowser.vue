@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useFileSystem } from '../composables/useFileSystem';
 import { useEventBus } from '../composables/useEventBus';
 import type { FileSystemEntry, FileEntry, DirectoryEntry } from '../composables/useFileSystem';
@@ -105,6 +105,40 @@ watch(rootHandle, async () => {
 
 const selectButtonText = computed(() => rootHandle.value ? '切换目录' : '选择目录');
 
+const focusSelectedItem = async () => {
+    if (!props.selectedFile || !rootHandle.value) return;
+    
+    let attempts = 0;
+    const maxAttempts = 5;
+    
+    const tryFocus = async () => {
+        await nextTick();
+        const container = document.querySelector('.file-list-container');
+        if (!container) return;
+        
+        const items = Array.from(container.querySelectorAll('.item-content[tabindex="0"]')) as HTMLElement[];
+        const target = items.find(i => i.dataset.name === props.selectedFile?.name);
+        
+        if (target) {
+            target.focus();
+            target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return true;
+        }
+        return false;
+    };
+
+    // First attempt immediately
+    if (await tryFocus()) return;
+
+    // Retry loop if not found (to handle rendering delays)
+    const interval = setInterval(async () => {
+        attempts++;
+        if (await tryFocus() || attempts >= maxAttempts) {
+            clearInterval(interval);
+        }
+    }, 50);
+};
+
 const loadFileTree = async () => {
   if (!rootHandle.value) {
     fileTree.value = [];
@@ -113,6 +147,8 @@ const loadFileTree = async () => {
   isLoading.value = true;
   try {
     fileTree.value = await listDirectory();
+    // After tree loads, focus the selected item if any
+    focusSelectedItem();
   } catch (error) {
     console.error("无法加载对话列表:", error);
     fileTree.value = [];
@@ -136,12 +172,12 @@ const handleFileClick = (event: { entry: FileEntry, path: string, parentHandle: 
   }
 };
 
-const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEntry; parentHandle: FileSystemDirectoryHandle | null }) => {
+const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEntry; parentHandle: FileSystemDirectoryHandle | null }, force = false) => {
     const confirmationMessage = entry.kind === 'directory' 
         ? `您确定要删除文件夹 "${entry.name}" 及其所有内容吗？此操作无法撤销。`
         : `您确定要删除 "${entry.name}" 吗？此操作无法撤销。`;
 
-    if (!confirm(confirmationMessage)) return;
+    if (!force && !confirm(confirmationMessage)) return;
 
     try {
         const resolvedParentHandle = await (parentHandle || chatsDirHandle.value);
@@ -164,11 +200,11 @@ const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEnt
     }
 };
 
-const handleRenameEntry = async ({ entry, parentHandle }: { entry: FileSystemEntry; parentHandle: FileSystemDirectoryHandle | null }) => {
+const handleRenameEntry = async ({ entry, parentHandle, newName }: { entry: FileSystemEntry; parentHandle: FileSystemDirectoryHandle | null; newName?: string }) => {
     const currentName = entry.name.replace('.json', '');
-    const newName = prompt('请输入新的名称:', currentName);
+    const finalNewName = newName || prompt('请输入新的名称:', currentName);
 
-    if (!newName || newName.trim() === '' || newName === currentName) {
+    if (!finalNewName || finalNewName.trim() === '' || finalNewName === currentName) {
         return;
     }
 
@@ -177,9 +213,9 @@ const handleRenameEntry = async ({ entry, parentHandle }: { entry: FileSystemEnt
         if (!resolvedParentHandle) throw new Error("无法找到父目录。");
 
         if (entry.kind === 'file') {
-            await renameConversation(entry.handle, newName, resolvedParentHandle);
+            await renameConversation(entry.handle, finalNewName, resolvedParentHandle);
         } else if (entry.kind === 'directory') {
-            await renameDirectory(entry.handle, newName, resolvedParentHandle);
+            await renameDirectory(entry.handle, finalNewName, resolvedParentHandle);
         }
     } catch (error) {
         console.error("重命名失败:", error);
@@ -288,9 +324,45 @@ const handleRootDrop = async (event: DragEvent) => {
             console.warn("Invalid drop data", e);
         }
     }
-    
-    // Clear global state is handled by dragend in DragSource, but good to be safe? 
-    // No, DragSource (FileTreeItem) `dragend` will fire.
+};
+
+const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        // Prevent default scroll
+        event.preventDefault();
+
+        const container = event.currentTarget as HTMLElement;
+        const items = Array.from(container.querySelectorAll('.item-content[tabindex="0"]')) as HTMLElement[];
+        if (items.length === 0) return;
+
+        const currentFocused = document.activeElement as HTMLElement;
+        let currentIndex = items.indexOf(currentFocused);
+        
+        let nextIndex = 0;
+        if (event.key === 'ArrowDown') {
+            nextIndex = currentIndex === -1 || currentIndex === items.length - 1 ? 0 : currentIndex + 1;
+        } else {
+            nextIndex = currentIndex === -1 || currentIndex === 0 ? items.length - 1 : currentIndex - 1;
+        }
+
+        const nextItem = items[nextIndex];
+        if (nextItem) {
+            nextItem.focus();
+            // Trigger click logic (without actual mouse event) to select/open
+            nextItem.click();
+            nextItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    } else if (event.key === 'Backspace' || event.key === 'Delete') {
+        const currentFocused = document.activeElement as HTMLElement;
+        const name = currentFocused?.dataset.name;
+        if (!name || !props.selectedFile || name !== props.selectedFile.name) return;
+
+        event.preventDefault();
+        
+        // Cmd key bypasses confirmation
+        const force = event.metaKey || event.ctrlKey;
+        handleDeleteEntry({ entry: props.selectedFile, parentHandle: chatsDirHandle.value }, force);
+    }
 };
 
 onMounted(() => {
@@ -302,6 +374,7 @@ onUnmounted(() => {
 });
 
 watch(rootHandle, loadFileTree, { immediate: true });
+watch(() => props.selectedFile, focusSelectedItem);
 </script>
 
 <template>
@@ -332,6 +405,7 @@ watch(rootHandle, loadFileTree, { immediate: true });
       @dragover="handleRootDragOver"
       @dragleave="handleRootDragLeave"
       @drop="handleRootDrop"
+      @keydown="handleKeyDown"
     >
       <div v-if="!rootHandle" class="placeholder">
         请选择一个目录来开始。

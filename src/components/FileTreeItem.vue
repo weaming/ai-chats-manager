@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import type { PropType } from 'vue';
 import type { FileSystemEntry, DirectoryEntry, FileEntry } from '../composables/useFileSystem';
 import { useDragDrop } from '../composables/useDragDrop';
@@ -30,6 +30,10 @@ const props = defineProps({
 
 const emit = defineEmits(['file-click', 'delete-entry', 'rename-entry', 'move-entry', 'turn-drop']);
 const dropTargetName = ref<string | null>(null);
+const editingName = ref<string | null>(null); // name of entry being edited
+const editValue = ref('');
+const renameInput = ref<HTMLInputElement | null>(null);
+const itemContent = ref<HTMLElement | null>(null);
 
 const { sourceParentHandle: dragSourceParentHandle } = useDragDrop();
 
@@ -47,8 +51,46 @@ const handleDeleteClick = (entry: FileSystemEntry) => {
   emit('delete-entry', { entry, parentHandle: props.parentHandle });
 };
 
+const vFocus = {
+  mounted: (el: HTMLInputElement) => {
+    el.focus();
+    el.select();
+  }
+};
+
 const handleRenameClick = (entry: FileSystemEntry) => {
-  emit('rename-entry', { entry, parentHandle: props.parentHandle });
+  editingName.value = entry.name;
+  editValue.value = formatName(entry.name);
+};
+
+const focusItem = (name: string) => {
+    // Since itemContent is in a v-for, it's an array of elements
+    // We need to find the one matching the entry name
+    if (Array.isArray(itemContent.value)) {
+        const el = itemContent.value.find((i: any) => i.dataset.name === name);
+        el?.focus();
+    } else if (itemContent.value && itemContent.value.dataset.name === name) {
+        itemContent.value.focus();
+    }
+};
+
+const commitRename = async (entry: FileSystemEntry) => {
+    if (!editingName.value) return;
+    const finalNewName = editValue.value.trim();
+    if (finalNewName && finalNewName !== formatName(entry.name)) {
+        emit('rename-entry', { entry, newName: finalNewName, parentHandle: props.parentHandle });
+    }
+    const oldName = editingName.value;
+    editingName.value = null;
+    await nextTick();
+    if (oldName) focusItem(oldName);
+};
+
+const cancelRename = async () => {
+    const oldName = editingName.value;
+    editingName.value = null;
+    await nextTick();
+    if (oldName) focusItem(oldName);
 };
 
 // --- Drag and Drop Handlers ---
@@ -186,7 +228,7 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
           'drop-target': dropTargetName === entry.name && entry.kind === 'directory',
           'active': entry.kind === 'file' && selectedFile?.name === entry.name 
       }]"
-      :draggable="entry.kind === 'file'"
+      :draggable="entry.kind === 'file' && editingName !== entry.name"
       @dragstart="handleDragStart($event, entry)"
       @dragend="handleDragEnd"
       @dragover="handleDragOver($event, entry)"
@@ -194,13 +236,18 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
       @drop="handleDrop($event, entry)"
     >
       <div 
+        ref="itemContent"
+        :data-name="entry.name"
         class="item-content" 
+        :tabindex="editingName === entry.name ? -1 : 0"
         :class="{ 
             'active': entry.kind === 'file' && selectedFile?.name === entry.name,
             'drop-target': dropTargetName === entry.name
         }"
         @click="handleItemClick(entry)"
-        :draggable="entry.kind === 'file'"
+        @dblclick.prevent.stop="handleRenameClick(entry)"
+        @keydown.enter.prevent.stop="handleRenameClick(entry)"
+        :draggable="entry.kind === 'file' && editingName !== entry.name"
         @dragstart="handleDragStart($event, entry)"
         @dragend="handleDragEnd"
         @dragover="(e) => entry.kind === 'directory' ? handleDragOver(e, entry) : handleFileDragOver(e, entry as FileEntry)"
@@ -208,9 +255,19 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
         @drop="(e) => entry.kind === 'directory' ? handleDrop(e, entry) : handleFileDrop(e, entry as FileEntry)"
       >
         <span class="icon">{{ entry.kind === 'directory' ? '📁' : '📄' }}</span>
-        <span class="name">{{ formatName(entry.name) }}</span>
+        <input 
+          v-if="editingName === entry.name"
+          ref="renameInput"
+          v-model="editValue"
+          v-focus
+          class="rename-input"
+          @click.stop
+          @keydown.enter.stop="commitRename(entry)"
+          @keydown.esc.stop.prevent="cancelRename"
+          @blur="commitRename(entry)"
+        />
+        <span v-else class="name">{{ formatName(entry.name) }}</span>
         <span v-if="selectionOrder[entry.name]" class="selection-badge">{{ selectionOrder[entry.name] }}</span>
-        <button class="action-btn rename-btn" @click.stop="handleRenameClick(entry)">✏️</button>
         <button class="action-btn delete-btn" @click.stop="handleDeleteClick(entry)">🗑️</button>
       </div>
       <FileTreeItem
@@ -250,6 +307,12 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
   background-color: #e9ecef;
 }
 
+.item-content:focus {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+  background-color: #f0f7ff;
+}
+
 .tree-item.active > .item-content {
     background-color: var(--primary-color);
     color: #fff;
@@ -274,6 +337,18 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
 
 .file .name {
   color: #007bff;
+}
+
+.rename-input {
+    flex-grow: 1;
+    font-size: 14px;
+    padding: 2px 4px;
+    border: 1px solid var(--primary-color);
+    border-radius: 4px;
+    outline: none;
+    background: white;
+    color: #333;
+    width: 0; /* Let flex-grow handle it */
 }
 
 .action-btn {
