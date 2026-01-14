@@ -71,7 +71,7 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             const conversationJson = [];
             for (const [index, turn] of conversationTurns.entries()) {
                 const contentHash = await calculateHash(turn.answer);
-                const answerId = `${index + 1}-${contentHash}`;
+                const answerId = contentHash;
                 const markdownFileName = `${answerId}.md`;
 
                 const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName, { create: true });
@@ -185,7 +185,7 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             // 2. Process updated turns: create new markdown files and build new JSON
             for (const [index, turn] of updatedTurns.entries()) {
                 const contentHash = await calculateHash(turn.answer);
-                const answerId = `${index + 1}-${contentHash}`;
+                const answerId = contentHash;
                 const markdownFileName = `${answerId}.md`;
 
                 // Write the new markdown file
