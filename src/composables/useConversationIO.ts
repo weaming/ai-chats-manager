@@ -99,7 +99,8 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             await writable.close();
 
             emitter.$emit('file-system-changed');
-            return { name: jsonFileHandle.name, kind: 'file', handle: jsonFileHandle };
+            const finalFile = await jsonFileHandle.getFile();
+            return { name: jsonFileHandle.name, kind: 'file', handle: jsonFileHandle, mtime: finalFile.lastModified };
 
         } catch (error) {
             console.error('保存对话时出错:', error);

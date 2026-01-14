@@ -10,6 +10,7 @@ export interface FileEntry {
   name: string;
   kind: 'file';
   handle: FileSystemFileHandle;
+  mtime: number;
 }
 
 export interface DirectoryEntry {
@@ -17,6 +18,7 @@ export interface DirectoryEntry {
   kind: 'directory';
   handle: FileSystemDirectoryHandle;
   children: FileSystemEntry[];
+  mtime: number;
 }
 
 export type FileSystemEntry = FileEntry | DirectoryEntry;
@@ -92,7 +94,8 @@ export function useFileSystem() {
       }
 
       const fileHandle = await currentDirHandle.getFileHandle(fileName);
-      return { name: fileHandle.name, kind: 'file', handle: fileHandle };
+      const file = await fileHandle.getFile();
+      return { name: fileHandle.name, kind: 'file', handle: fileHandle, mtime: file.lastModified };
     } catch (error) {
       console.error(`Error finding file by path "${path}":`, error);
       return null;
@@ -122,10 +125,24 @@ export function useFileSystem() {
     try {
       for await (const entry of targetHandle.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-          entries.push({ name: entry.name, kind: 'file', handle: entry as FileSystemFileHandle });
+          const file = await (entry as FileSystemFileHandle).getFile();
+          entries.push({ 
+            name: entry.name, 
+            kind: 'file', 
+            handle: entry as FileSystemFileHandle, 
+            mtime: file.lastModified 
+          });
         } else if (entry.kind === 'directory') {
           const children = await listDirectory(entry as FileSystemDirectoryHandle);
-          entries.push({ name: entry.name, kind: 'directory', handle: entry as FileSystemDirectoryHandle, children });
+          // Directory mtime is the max mtime of its children
+          const maxChildMtime = children.reduce((max, child) => Math.max(max, child.mtime), 0);
+          entries.push({ 
+            name: entry.name, 
+            kind: 'directory', 
+            handle: entry as FileSystemDirectoryHandle, 
+            children,
+            mtime: maxChildMtime
+          });
         }
       }
     } catch (error) {
@@ -134,16 +151,20 @@ export function useFileSystem() {
     }
 
     return entries.sort((a, b) => {
+        // Rule 1: Folders always at the top within the same level
         if (a.kind === 'directory' && b.kind === 'file') {
             return -1;
         }
         if (a.kind === 'file' && b.kind === 'directory') {
             return 1;
         }
-        if (a.kind === 'directory' && b.kind === 'directory') {
-            return a.name.localeCompare(b.name);
+        
+        // Rule 2: Both sorted by mtime descending (newest first)
+        if (b.mtime !== a.mtime) {
+            return b.mtime - a.mtime;
         }
-        // Both are files, sort by name descending (newest first)
+
+        // Rule 3: Tie-break with name
         return b.name.localeCompare(a.name);
     });
   };
@@ -225,7 +246,12 @@ export function useFileSystem() {
                   const file = await (entry as FileSystemFileHandle).getFile();
                   if (!latestFile || file.lastModified > latestFile.time) {
                       latestFile = { 
-                          entry: { name: entry.name, kind: 'file', handle: entry as FileSystemFileHandle },
+                          entry: { 
+                              name: entry.name, 
+                              kind: 'file', 
+                              handle: entry as FileSystemFileHandle,
+                              mtime: file.lastModified
+                          },
                           path: currentPath ? `${currentPath}/${entry.name}` : entry.name,
                           time: file.lastModified
                       };
