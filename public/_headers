@@ -1,0 +1,7 @@
+# Default: No caching for HTML to ensure updates are seen immediately
+/*
+  Cache-Control: no-cache
+
+# Cache static assets (hashed by Vite) for a long time (1 year)
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
