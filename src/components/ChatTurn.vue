@@ -1,0 +1,255 @@
+<script setup lang="ts">
+import { ref, watch, nextTick } from 'vue';
+import type { PropType } from 'vue';
+import type { FullConversationTurn } from '../composables/useFileSystem';
+
+interface SelectionState {
+    question: boolean;
+    answer: boolean;
+}
+
+// RenderedTurn interface (implicit in parent, explicit here for safety)
+interface RenderedTurn extends FullConversationTurn {
+    index: number;
+    questionNumber: number;
+}
+
+const props = defineProps({
+    turn: {
+        type: Object as PropType<RenderedTurn>,
+        required: true,
+    },
+    rawTurn: {
+        type: Object as PropType<FullConversationTurn>,
+        required: true,
+    },
+    isEditing: {
+        type: Boolean,
+        default: false,
+    },
+    selection: {
+        type: Object as PropType<SelectionState | undefined>,
+        default: undefined,
+    }
+});
+
+const emit = defineEmits<{
+    (e: 'toggle-selection'): void;
+    (e: 'toggle-question-selection'): void;
+    (e: 'edit-start'): void;
+    (e: 'edit-cancel'): void;
+    (e: 'edit-save', payload: { question: string | null; answer: string }): void;
+}>();
+
+const draftQuestion = ref<string | null>(null);
+const draftAnswer = ref('');
+const minHeight = ref(0);
+const rootEl = ref<HTMLElement | null>(null);
+
+// Initialize drafts when entering edit mode
+watch(() => props.isEditing, async (newVal) => {
+    if (newVal) {
+        // Measure height before switching view
+        if (rootEl.value) {
+            minHeight.value = rootEl.value.offsetHeight;
+        }
+        draftQuestion.value = props.rawTurn.question;
+        draftAnswer.value = props.rawTurn.answer;
+    } else {
+        minHeight.value = 0;
+    }
+});
+
+const handleSave = () => {
+    emit('edit-save', {
+        question: draftQuestion.value,
+        answer: draftAnswer.value,
+    });
+};
+
+const handleCancel = () => {
+    emit('edit-cancel');
+};
+</script>
+
+<template>
+    <div class="chat-turn" ref="rootEl">
+        <!-- Left Column: Controls -->
+        <div class="turn-controls">
+            <template v-if="!isEditing">
+                <span v-if="turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
+                <button v-if="turn.questionNumber > 0" class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+            </template>
+        </div>
+
+        <!-- Right Column: Content -->
+        <div class="turn-content">
+            <!-- Viewing Mode -->
+            <div v-if="!isEditing" @click="$emit('toggle-selection')">
+                <div v-if="turn.questionNumber > 0" class="chat-bubble question"
+                    @click.stop="$emit('toggle-question-selection')">
+                    <div class="bubble-content" :class="{ active: selection?.question }">{{ turn.question }}</div>
+                </div>
+                <div class="chat-bubble answer">
+                    <div class="bubble-content markdown-body" :class="{ active: selection?.answer }"
+                        v-html="turn.answer"></div>
+                </div>
+            </div>
+
+            <!-- Editing Mode -->
+            <div v-else class="editing-view" :style="{ minHeight: minHeight + 'px' }">
+                <div v-if="draftQuestion !== null" class="editing-group">
+                    <label>问题</label>
+                    <textarea v-model="draftQuestion" rows="3"></textarea>
+                </div>
+                <div class="editing-group answer-group">
+                    <label>回答</label>
+                    <textarea v-model="draftAnswer" class="answer-textarea"></textarea>
+                </div>
+                <div class="editing-actions">
+                    <button class="primary-btn" @click="handleSave">保存</button>
+                    <button class="secondary-btn" @click="handleCancel">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+.chat-turn {
+  display: flex;
+  gap: 15px; /* Space between left and right columns */
+}
+
+.turn-controls {
+  flex-shrink: 0;
+  width: 40px; /* Fixed width for the left column */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* Align to the top */
+  padding-top: 5px; /* Align with the top of the bubble */
+}
+
+.turn-content {
+  flex-grow: 1;
+}
+
+.edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 5px 0;
+  margin-top: 5px; /* Space between number and button */
+  color: #6c757d;
+}
+.edit-btn:hover {
+  color: var(--primary-color);
+}
+
+.chat-bubble {
+  display: flex;
+  width: 100%; /* Bubbles now take full width of the right column */
+  align-items: flex-start;
+}
+
+.bubble-content {
+  padding: 12px 18px;
+  border-radius: 18px;
+  line-height: 1.6;
+  border: 2px solid var(--border-color);
+  background-clip: padding-box;
+  width: 100%;
+}
+
+.bubble-content.active {
+    border-color: var(--primary-color);
+}
+
+.question-number {
+  background-color: #f1f3f5;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  color: #495057;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  height: 24px;
+  width: 24px;
+  flex-shrink: 0;
+}
+
+/* Question and Answer bubbles are now left-aligned by default */
+.chat-bubble.question {
+  margin-bottom: 15px; /* Space between Q and A */
+}
+.question .bubble-content {
+  background-color: #e9ecef;
+  color: #343a40;
+}
+
+.answer .bubble-content {
+  background-color: #f8f9fa;
+  color: #212529;
+}
+
+/* Editing View Styles */
+.editing-view {
+    padding: 15px;
+    border: 1px dashed var(--primary-color);
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+}
+.editing-group {
+    margin-bottom: 15px;
+}
+.editing-group.answer-group {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+.editing-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #495057;
+}
+.editing-group textarea {
+    width: 100%;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #ced4da;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+}
+.editing-group textarea.answer-textarea {
+    flex-grow: 1;
+}
+.editing-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 15px;
+}
+.editing-actions button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.editing-actions .primary-btn {
+    background-color: var(--primary-color);
+    color: white;
+}
+.editing-actions .secondary-btn {
+    background-color: #6c757d;
+    color: white;
+}
+</style>
