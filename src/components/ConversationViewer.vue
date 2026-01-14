@@ -246,7 +246,7 @@ const generateImage = async () => {
       // No explicit width/height here, let html-to-image calculate based on element's rendered size
     });
     const link = document.createElement('a');
-    link.download = `gemini-chat-${Date.now()}.png`;
+    link.download = `ai-chat-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
   } catch (error) {

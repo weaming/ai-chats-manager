@@ -7,7 +7,7 @@ interface MyDB extends DBSchema {
   };
 }
 
-const dbPromise = openDB<MyDB>('gemini-screenshot-db', 1, {
+const dbPromise = openDB<MyDB>('ai-screenshot-db', 1, {
   upgrade(db) {
     db.createObjectStore('keyval');
   },

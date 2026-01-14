@@ -73,7 +73,7 @@ const completeConversation = async () => {
     </div>
     <div class="input-group">
       <label for="answer-input">回答 (必填):</label>
-      <textarea id="answer-input" v-model="currentAnswer" placeholder="请输入 Gemini 的回答（Markdown 格式）"></textarea>
+      <textarea id="answer-input" v-model="currentAnswer" placeholder="请输入 AI 的回答（Markdown 格式）"></textarea>
     </div>
 
     <!-- Action Buttons -->
