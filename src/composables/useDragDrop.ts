@@ -1,0 +1,11 @@
+import { ref } from 'vue';
+
+const sourceParentHandle = ref<FileSystemDirectoryHandle | null>(null);
+const draggedEntryName = ref<string | null>(null);
+
+export function useDragDrop() {
+  return {
+    sourceParentHandle,
+    draggedEntryName,
+  };
+}

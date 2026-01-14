@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useFileSystem } from '../composables/useFileSystem';
 import { useEventBus } from '../composables/useEventBus';
 import type { FileSystemEntry, FileEntry, DirectoryEntry } from '../composables/useFileSystem';
+import { useDragDrop } from '../composables/useDragDrop';
 import FileTreeItem from './FileTreeItem.vue';
 
 const props = defineProps({
@@ -21,11 +22,24 @@ const emitter = useEventBus();
 const fileTree = ref<FileSystemEntry[]>([]);
 const isLoading = ref(false);
 const emit = defineEmits(['file-click']);
+const isDragOverRoot = ref(false);
 
-const chatsDirHandle = computed(async () => {
-    if (!rootHandle.value) return null;
-    return await rootHandle.value.getDirectoryHandle('chats');
-});
+const { sourceParentHandle: dragSourceParentHandle } = useDragDrop();
+
+const chatsDirHandle = ref<FileSystemDirectoryHandle | null>(null);
+
+watch(rootHandle, async () => {
+    if (!rootHandle.value) {
+        chatsDirHandle.value = null;
+        return;
+    }
+    try {
+        chatsDirHandle.value = await rootHandle.value.getDirectoryHandle('chats');
+    } catch (e) {
+        console.error("Failed to get chats directory", e);
+        chatsDirHandle.value = null;
+    }
+}, { immediate: true });
 
 const selectButtonText = computed(() => rootHandle.value ? '切换目录' : '选择目录');
 
@@ -67,7 +81,7 @@ const handleDeleteEntry = async ({ entry, parentHandle }: { entry: FileSystemEnt
         }
     } catch (error) {
         console.error("删除失败:", error);
-        alert(`删除 "${entry.name}" 失败: ${error.message}`);
+        alert(`删除 "${entry.name}" 失败: ${(error as Error).message}`);
     }
 };
 
@@ -90,7 +104,7 @@ const handleRenameEntry = async ({ entry, parentHandle }: { entry: FileSystemEnt
         }
     } catch (error) {
         console.error("重命名失败:", error);
-        alert(`重命名 "${entry.name}" 失败: ${error.message}`);
+        alert(`重命名 "${entry.name}" 失败: ${(error as Error).message}`);
     }
 };
 
@@ -102,7 +116,7 @@ const handleCreateDirectory = async () => {
         await createDirectory(dirName);
     } catch (error) {
         console.error("创建文件夹失败:", error);
-        alert(`创建文件夹 "${dirName}" 失败: ${error.message}`);
+        alert(`创建文件夹 "${dirName}" 失败: ${(error as Error).message}`);
     }
 };
 
@@ -110,13 +124,63 @@ const handleMoveEntry = async ({ sourceName, sourceParentHandle, targetDirHandle
     try {
         const resolvedParentHandle = await (sourceParentHandle || chatsDirHandle.value);
         if (!resolvedParentHandle) throw new Error("无法找到源父目录。");
-        if (resolvedParentHandle.name === targetDirHandle.name && resolvedParentHandle.kind === targetDirHandle.kind) return; // Cannot move into same folder
+        if (await resolvedParentHandle.isSameEntry(targetDirHandle)) return; // Cannot move into same folder
 
         await moveConversation(sourceName, resolvedParentHandle, targetDirHandle);
     } catch (error) {
         console.error("移动文件失败:", error);
-        alert(`移动文件 "${sourceName}" 失败: ${error.message}`);
+        alert(`移动文件 "${sourceName}" 失败: ${(error as Error).message}`);
     }
+};
+
+const handleRootDragOver = (event: DragEvent) => {
+    event.preventDefault();
+    if (dragSourceParentHandle.value) {
+        isDragOverRoot.value = true;
+    }
+};
+
+const handleRootDragLeave = (event: DragEvent) => {
+    // Only set to false if we are leaving the container, not entering a child
+    if (event.currentTarget === event.target) {
+         isDragOverRoot.value = false;
+    }
+};
+// Use dragleave on the container with a check or just simple toggle for now. 
+// Actually, detailed drag leave logic on containers with children is tricky.
+// Simplified: Just set false. If it flickers, we can refine.
+// Better approach for container: 
+// The `dragleave` fires when entering a child. 
+// A common fix is using a counter or checking `relatedTarget`.
+const handleRootDragLeaveSimple = () => {
+    isDragOverRoot.value = false;
+};
+
+
+const handleRootDrop = async (event: DragEvent) => {
+    event.preventDefault();
+    isDragOverRoot.value = false;
+
+    if (!dragSourceParentHandle.value || !chatsDirHandle.value) return;
+
+    // Check if data is valid
+     if (event.dataTransfer) {
+        try {
+            const data = JSON.parse(event.dataTransfer.getData('text/plain'));
+            if (data.kind === 'file') {
+                 await handleMoveEntry({
+                    sourceName: data.name,
+                    sourceParentHandle: dragSourceParentHandle.value,
+                    targetDirHandle: chatsDirHandle.value
+                 });
+            }
+        } catch (e) {
+            console.warn("Invalid drop data", e);
+        }
+    }
+    
+    // Clear global state is handled by dragend in DragSource, but good to be safe? 
+    // No, DragSource (FileTreeItem) `dragend` will fire.
 };
 
 onMounted(() => {
@@ -146,7 +210,13 @@ watch(rootHandle, loadFileTree, { immediate: true });
         <button @click="selectDirectory">{{ selectButtonText }}</button>
     </div>
 
-    <div class="file-list-container">
+    <div 
+      class="file-list-container"
+      :class="{ 'drop-target': isDragOverRoot }"
+      @dragover="handleRootDragOver"
+      @dragleave="handleRootDragLeaveSimple"
+      @drop="handleRootDrop"
+    >
       <div v-if="!rootHandle" class="placeholder">
         请选择一个目录来开始。
       </div>
@@ -251,5 +321,10 @@ h2 {
   text-align: center;
   color: #6c757d;
   padding: 30px;
+}
+
+.file-list-container.drop-target {
+    background-color: #e9ecef;
+    border: 2px dashed #007bff;
 }
 </style>

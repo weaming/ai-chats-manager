@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import type { PropType } from 'vue';
 import type { FileSystemEntry, DirectoryEntry, FileEntry } from '../composables/useFileSystem';
+import { useDragDrop } from '../composables/useDragDrop';
 import { joinPath } from '../utils/path';
 
 const props = defineProps({
@@ -26,6 +27,8 @@ const props = defineProps({
 const emit = defineEmits(['file-click', 'delete-entry', 'rename-entry', 'move-entry']);
 const isDropTarget = ref(false);
 
+const { sourceParentHandle: dragSourceParentHandle } = useDragDrop();
+
 const formatName = (name: string) => {
     return name.endsWith('.json') ? name.slice(0, -5) : name;
 };
@@ -48,12 +51,19 @@ const handleRenameClick = (entry: FileSystemEntry) => {
 
 const handleDragStart = (event: DragEvent, entry: FileSystemEntry) => {
   if (event.dataTransfer) {
+    event.stopPropagation();
+    dragSourceParentHandle.value = props.parentHandle;
     event.dataTransfer.setData('text/plain', JSON.stringify({
       name: entry.name,
       kind: entry.kind,
     }));
     event.dataTransfer.effectAllowed = 'move';
   }
+};
+
+const handleDragEnd = () => {
+    dragSourceParentHandle.value = null;
+    isDropTarget.value = false;
 };
 
 const handleDragOver = (event: DragEvent, entry: FileSystemEntry) => {
@@ -67,19 +77,30 @@ const handleDragLeave = () => {
   isDropTarget.value = false;
 };
 
-const handleDrop = (event: DragEvent, targetDir: DirectoryEntry) => {
+const handleDrop = (event: DragEvent, targetEntry: FileSystemEntry) => {
   event.preventDefault();
+  event.stopPropagation();
   isDropTarget.value = false;
-  if (event.dataTransfer) {
+  
+  if (event.dataTransfer && dragSourceParentHandle.value) {
     const data = JSON.parse(event.dataTransfer.getData('text/plain'));
     if (data.kind === 'file') {
-      emit('move-entry', {
-        sourceName: data.name,
-        sourceParentHandle: props.parentHandle,
-        targetDirHandle: targetDir.handle,
-      });
+      
+      let targetDirHandle = props.parentHandle;
+      if (targetEntry.kind === 'directory') {
+          targetDirHandle = targetEntry.handle;
+      }
+
+      if (targetDirHandle) {
+          emit('move-entry', {
+            sourceName: data.name,
+            sourceParentHandle: dragSourceParentHandle.value,
+            targetDirHandle: targetDirHandle,
+          });
+      }
     }
   }
+  dragSourceParentHandle.value = null;
 };
 
 const handleChildFileClick = (event: { entry: FileEntry, path: string }) => {
@@ -98,9 +119,10 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string }) => {
       }]"
       :draggable="entry.kind === 'file'"
       @dragstart="handleDragStart($event, entry)"
+      @dragend="handleDragEnd"
       @dragover="handleDragOver($event, entry)"
       @dragleave="handleDragLeave"
-      @drop="handleDrop($event, entry as DirectoryEntry)"
+      @drop="handleDrop($event, entry)"
     >
       <div class="item-content" @click="handleItemClick(entry)">
         <span class="icon">{{ entry.kind === 'directory' ? '📁' : '📄' }}</span>
