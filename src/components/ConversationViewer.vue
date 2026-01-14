@@ -5,6 +5,8 @@ import { useFileSystem, type FullConversationTurn } from '../composables/useFile
 import { useDragDrop } from '../composables/useDragDrop';
 import { marked } from 'marked';
 import { generateAndDownloadImage } from '../utils/imageGenerator';
+import { fixMarkdownSpacing } from '../utils/markdownUtils'; // Import fix utility
+import { diffChars, type DiffPart } from '../utils/simpleDiff';
 import ChatTurn from './ChatTurn.vue';
 
 interface Selection {
@@ -98,6 +100,14 @@ const cancelEditing = () => {
     editingTurn.value = null;
 };
 
+// ESC 键取消编辑
+const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && editingTurn.value !== null) {
+        cancelEditing();
+    }
+};
+
+
 const saveEditing = async (index: number, payload: { question: string | null; answer: string }) => {
     const { question, answer } = payload;
     
@@ -130,6 +140,110 @@ const saveEditing = async (index: number, payload: { question: string | null; an
 
 const { draggedTurnState } = useDragDrop();
 const dropTargetIndex = ref<number | null>(null);
+
+// --- Markdown Fix Logic ---
+const showFixModal = ref(false);
+const showRawDiff = ref(false); // Toggle for Diff View
+
+const handleFixModalKeyDown = (event: KeyboardEvent) => {
+    if (!showFixModal.value) return;
+    
+    if (event.key === 'Escape') {
+        event.stopPropagation();
+        closeFixModal();
+    } else if (event.key === 'Enter') {
+        if (!isLoading.value) {
+            applyFixes();
+        }
+    }
+};
+
+watch(showFixModal, (newVal) => {
+    if (newVal) {
+        window.addEventListener('keydown', handleFixModalKeyDown);
+    } else {
+        window.removeEventListener('keydown', handleFixModalKeyDown);
+    }
+});
+
+interface FixPreviewItem {
+    index: number;
+    question: string | null;
+    originalAnswer: string;
+    fixedAnswer: string;
+    diffs?: DiffPart[];
+}
+const fixPreviewData = ref<FixPreviewItem[]>([]);
+
+const handleCheckFormatting = () => {
+    const selectedIndices = selectionState.value.map(s => s.index);
+    if (selectedIndices.length === 0) return;
+
+    const fixes: FixPreviewItem[] = [];
+    
+    selectedIndices.forEach(index => {
+        const turn = conversation.value[index];
+        if (!turn) return;
+        
+        const originalAnswer = turn.answer;
+        const fixedAnswer = fixMarkdownSpacing(originalAnswer);
+        
+        // Only include if there is actually a change
+        if (originalAnswer !== fixedAnswer) {
+            fixes.push({
+                index,
+                question: turn.question,
+                originalAnswer,
+                fixedAnswer,
+                diffs: diffChars(originalAnswer, fixedAnswer)
+            });
+        }
+    });
+
+    if (fixes.length === 0) {
+        alert('未检测到需要修复的格式问题。');
+        return;
+    }
+
+    fixPreviewData.value = fixes;
+    showFixModal.value = true;
+};
+
+const applyFixes = async () => {
+    // Apply changes locally
+    const updatedConversation = [...conversation.value];
+    
+    fixPreviewData.value.forEach(item => {
+        const turn = updatedConversation[item.index];
+        if (turn) {
+            updatedConversation[item.index] = {
+                ...turn,
+                answer: item.fixedAnswer
+            };
+        }
+    });
+    
+    isLoading.value = true;
+    try {
+        await updateConversation(props.fileHandle, updatedConversation);
+        // Clear selection and close modal
+        selectionState.value = [];
+        showFixModal.value = false;
+        fixPreviewData.value = [];
+        await loadConversation();
+    } catch (e) {
+        console.error("修复保存失败:", e);
+        alert('保存修复内容失败。');
+    } finally {
+        isLoading.value = false;
+    }
+};
+
+const closeFixModal = () => {
+    showFixModal.value = false;
+    fixPreviewData.value = [];
+    showRawDiff.value = false; // Reset toggle
+};
 
 const handleDragOver = (event: DragEvent, index: number) => {
     // Only handle if dragging a turn
@@ -490,10 +604,12 @@ const handleTransferComplete = async (payload?: { sourceIndices?: number[] }) =>
 
 onMounted(() => {
     emitter.$on('turn-transfer-complete', handleTransferComplete);
+    window.addEventListener('keydown', handleKeyDown);
 });
 
 onUnmounted(() => {
     emitter.$off('turn-transfer-complete', handleTransferComplete);
+    window.removeEventListener('keydown', handleKeyDown);
 });
 </script>
 
@@ -504,6 +620,7 @@ onUnmounted(() => {
       <div style="display: flex; gap: 10px;">
         <button @click="handleSelectAll" :disabled="isAllSelected">全选</button>
         <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
+        <button @click="handleCheckFormatting" :disabled="selectionState.length === 0" title="检查选中内容是否有Markdown格式问题">修复格式</button>
         <button @click="handleDeleteSelected" :disabled="selectionState.length === 0" class="danger-btn">删除</button>
         <button @click="generateImage" :disabled="selectionState.length === 0">分享</button>
       </div>
@@ -574,9 +691,272 @@ onUnmounted(() => {
   <div id="share-container" style="position: absolute; visibility: hidden; background: white; padding: 20px; width: 800px;">
     <!-- Content is now injected dynamically via generateImage function -->
   </div>
+
+  <!-- Markdown Fix Preview Modal -->
+  <div v-if="showFixModal" class="modal-overlay">
+      <div class="modal-content fix-modal">
+          <div class="modal-header">
+              <h3>格式修复预览</h3>
+               <div class="header-actions">
+                   <label class="toggle-switch">
+                       <input type="checkbox" v-model="showRawDiff">
+                       <span class="slider"></span>
+                       <span class="label-text">显示源码对比</span>
+                   </label>
+                   <button class="close-btn" @click="closeFixModal">×</button>
+               </div>
+          </div>
+          <div class="modal-body">
+              <p class="hint">检测到以下 {{ fixPreviewData.length }} 处格式问题，请确认修复：</p>
+              <div class="fix-list">
+                  <div v-for="(item, idx) in fixPreviewData" :key="idx" class="fix-item">
+                      <div class="fix-source">
+                          <strong>问题 #{{ item.index + 1 }}</strong>
+                          <span v-if="item.question"> (Q: {{ item.question.substring(0, 20) }}...)</span>
+                      </div>
+                      <div class="diff-container" v-if="!showRawDiff">
+                        <div class="diff-box original">
+                            <div class="diff-label">原内容</div>
+                            <div class="markdown-preview" v-html="marked(item.originalAnswer)"></div>
+                        </div>
+                        <div class="diff-arrow">➡️</div>
+                        <div class="diff-box fixed">
+                            <div class="diff-label">修复后</div>
+                            <div class="markdown-preview" v-html="marked(item.fixedAnswer)"></div>
+                        </div>
+                      </div>
+                      
+                      <!-- Raw Diff View -->
+                      <div class="diff-container raw-mode" v-else>
+                          <div class="diff-box">
+                              <div class="diff-label">源码差异</div>
+                              <pre class="code-diff"><code><template v-for="(part, pIdx) in item.diffs" :key="pIdx"><span :class="'diff-' + part.type">{{ part.value }}</span></template></code></pre>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+          <div class="modal-footer">
+              <button class="cancel-btn" @click="closeFixModal">取消</button>
+              <button class="confirm-btn" @click="applyFixes" :disabled="isLoading">
+                  {{ isLoading ? '应用中...' : '确认应用修复' }}
+              </button>
+          </div>
+      </div>
+  </div>
 </template>
 
 <style scoped>
+/* Fix Modal Styles */
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.header-actions {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.code-diff {
+    background: #f6f8fa;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-family: monospace;
+    margin: 0;
+    overflow-x: auto;
+    font-size: 1.1em; /* Increased from 0.9em */
+    line-height: 1.6;
+}
+
+.diff-added {
+    background-color: #acf2bd;
+    color: #1a7f37;
+    text-decoration: none;
+}
+
+.diff-removed {
+    background-color: #ffdce0;
+    color: #cf222e;
+    text-decoration: line-through;
+}
+
+/* ... existing styles ... */
+.fix-modal {
+    max-width: 80vw;
+    max-height: 90vh;
+    width: 90%;
+}
+
+.fix-list {
+    overflow-y: auto;
+    max-height: 60vh;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.fix-item {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+.fix-source {
+    margin-bottom: 10px;
+    font-size: 0.9em;
+    color: #6c757d;
+}
+
+.diff-container {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.diff-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.diff-label {
+    font-size: 0.8rem;
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: #495057;
+}
+
+.markdown-preview {
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    margin: 0;
+    flex: 1;
+    overflow-x: auto;
+    line-height: 1.5;
+}
+
+.diff-box.fixed .markdown-preview {
+    background: #e6fffa;
+    border: 1px solid #b2f5ea;
+}
+
+.diff-box.original .markdown-preview {
+    background: #fff5f5;
+    border: 1px solid #fed7d7;
+}
+
+/* Basic styling for markdown content inside preview */
+.markdown-preview :deep(p) {
+    margin: 0.5em 0;
+}
+.markdown-preview :deep(ul), .markdown-preview :deep(ol) {
+    padding-left: 20px;
+    margin: 0.5em 0;
+}
+.markdown-preview :deep(code) {
+    background: rgba(0,0,0,0.05);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+.markdown-preview :deep(pre) {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+}
+
+.diff-arrow {
+    display: flex;
+    align-items: center;
+    font-size: 1.2rem;
+    color: #adb5bd;
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+}
+.modal-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.modal-body {
+    padding: 20px;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+}
+.confirm-btn {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.confirm-btn:hover {
+    filter: brightness(90%);
+}
+.cancel-btn {
+    background: white;
+    border: 1px solid #ced4da;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
 .viewer-header {
   display: flex;
   justify-content: space-between;

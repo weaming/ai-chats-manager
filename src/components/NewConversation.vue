@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { useFileSystem, type FullConversationTurn } from '../composables/useFileSystem';
 import ChatTurn from './ChatTurn.vue';
 import { marked } from 'marked';
@@ -79,6 +79,21 @@ const startEditing = (index: number) => {
 const cancelEditing = () => {
     editingTurn.value = null;
 };
+
+// ESC 键取消编辑
+const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && editingTurn.value !== null) {
+        cancelEditing();
+    }
+};
+
+onMounted(() => {
+    window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleKeyDown);
+});
 
 const saveEditing = (index: number, payload: { question: string | null; answer: string }) => {
     const { question, answer } = payload;
