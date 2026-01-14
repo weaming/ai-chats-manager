@@ -22,26 +22,25 @@ defineProps<{
 
 <template>
   <div class="share-preview-container">
-    <div class="share-header"></div>
+    <div v-if="$slots.header" class="share-header">
+      <slot name="header"></slot>
+    </div>
     <div v-for="(item, idx) in turns" :key="idx" class="share-item">
-      <!-- 
-           We use ChatTurn to render. 
-           We assume 'item.turn' has been modified to only contain 
-           the text we want to show (i.e. unselected parts are cleared).
-      -->
       <ChatTurn 
         :turn="item.turn" 
         :raw-turn="item.turn" 
         layout-mode="export"
       />
     </div>
-    <div class="share-footer"></div>
+    <div v-if="$slots.footer" class="share-footer">
+      <slot name="footer"></slot>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .share-preview-container {
-  padding: 10px;
+  padding: 20px;
   background: white;
   width: 800px;
   box-sizing: border-box;
@@ -51,10 +50,13 @@ defineProps<{
 }
 
 .share-item {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
-/* Optional hooks for branding */
+.share-item:last-child {
+  margin-bottom: 0;
+}
+
 .share-header {
   margin-bottom: 20px;
 }

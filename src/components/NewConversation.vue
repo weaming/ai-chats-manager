@@ -327,7 +327,7 @@ const renderedTurns = computed(() => {
                 />
                 <textarea 
                     v-model="importText" 
-                    placeholder="粘贴 Gemini 对话内容..." 
+                    placeholder="粘贴对话内容..." 
                     class="import-textarea"
                     rows="15"
                 ></textarea>

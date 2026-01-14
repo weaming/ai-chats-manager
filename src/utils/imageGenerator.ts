@@ -1,30 +1,26 @@
 import { toPng } from 'html-to-image';
 import type { FullConversationTurn } from '../composables/useFileSystem';
 
-interface Selection {
+// Re-export specific interfaces if needed by consumers
+export interface Selection {
     index: number;
     question: boolean;
     answer: boolean;
 }
 
-interface RenderedTurn extends FullConversationTurn {
+export interface RenderedTurn extends FullConversationTurn {
     index: number;
     questionNumber: number;
 }
 
-import { createApp, h, nextTick } from 'vue';
-import SharePreview from '../components/SharePreview.vue';
-
-export const generateAndDownloadImage = async (
+// 1. Prepare Data Logic
+export const prepareShareData = (
     selectionState: Selection[],
     renderedConversation: RenderedTurn[]
 ) => {
-    const element = document.getElementById('share-container');
-    if (!element) return;
-
-    // 1. Prepare data
     // Filter and map to the structure SharePreview expects
     const selectedItems = selectionState
+        .filter(s => s.question || s.answer)
         .sort((a, b) => a.index - b.index)
         .map(selection => {
             const originalTurn = renderedConversation[selection.index];
@@ -58,54 +54,61 @@ export const generateAndDownloadImage = async (
         };
     });
 
-    if (turnsToRender.length === 0) return;
+    return turnsToRender;
+};
 
-    // 2. Clear container
-    element.innerHTML = '';
-
-    // 3. Create temporary App
-    const tempApp = createApp({
-        render() {
-            return h(SharePreview, {
-                turns: turnsToRender
-            });
-        }
-    });
-
-    // 4. Mount
-    const mountNode = document.createElement('div');
-    element.appendChild(mountNode);
-    tempApp.mount(mountNode);
-
-    // 5. Setup visibility for capture
-    // Use fixed position and move it far off-screen to avoid "flash" or layout shifts
-    element.style.position = 'fixed';
-    element.style.left = '-9999px'; 
-    element.style.top = '0';
-    element.style.visibility = 'visible';
-    element.style.zIndex = '-1000';
+// 2. Download Logic from an isolated clone
+export const downloadElementAsPng = async (originalElement: HTMLElement) => {
+    // 1. Create an isolated clone
+    const clone = originalElement.cloneNode(true) as HTMLElement;
     
-    // Wait for render
-    await nextTick();
-    await new Promise(resolve => setTimeout(resolve, 300)); // Extra buffer for fonts/images
+    // Ensure the clone is visible but off-screen and has no parent-inherited constraints
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.zIndex = '-10000';
+    container.style.padding = '0';
+    container.style.margin = '0';
+    container.style.background = 'white';
+    
+    // Force reset any inherited styles that might cause gaps or truncation
+    clone.style.width = '800px';
+    clone.style.height = 'auto';
+    clone.style.overflow = 'visible';
+    clone.style.margin = '0';
+    clone.style.display = 'block';
+    
+    container.appendChild(clone);
+    document.body.appendChild(container);
 
     try {
-        const dataUrl = await toPng(element.firstElementChild as HTMLElement, {
+        // Wait for fonts and all internal images to be ready
+        await document.fonts.ready;
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        const dataUrl = await toPng(clone, {
             cacheBust: true,
             skipAutoScale: true,
-            pixelRatio: 3, 
+            pixelRatio: 2, 
+            backgroundColor: 'white',
+            // Do NOT pass width/height here; let html-to-image measure the isolated block
         });
+        
         const link = document.createElement('a');
         link.download = `chat-${Date.now()}.png`;
         link.href = dataUrl;
         link.click();
     } catch (error) {
         console.error('oops, something went wrong!', error);
+        throw error;
     } finally {
-        // 6. Cleanup
-        tempApp.unmount();
-        element.style.visibility = 'hidden';
-        element.innerHTML = '';
-        element.style.top = '-9999px';
+        // Cleanup
+        document.body.removeChild(container);
     }
 };
+
+/* 
+   Deprecated: generateAndDownloadImage 
+   The logic is now split into prepareShareData + rendering in Vue component + downloadElementAsPng
+*/

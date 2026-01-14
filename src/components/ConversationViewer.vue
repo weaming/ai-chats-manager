@@ -4,7 +4,8 @@ import type { PropType } from 'vue';
 import { useFileSystem, type FullConversationTurn } from '../composables/useFileSystem';
 import { useDragDrop } from '../composables/useDragDrop';
 import { marked } from 'marked';
-import { generateAndDownloadImage } from '../utils/imageGenerator';
+import { prepareShareData } from '../utils/imageGenerator';
+import { useShareStore } from '../stores/shareStore';
 import { fixMarkdownSpacing } from '../utils/markdownUtils'; // Import fix utility
 import { diffChars, type DiffPart } from '../utils/simpleDiff';
 import ChatTurn from './ChatTurn.vue';
@@ -458,14 +459,23 @@ const formattedFileName = computed(() => {
 // Reordered loadConversation to top
 
 
-const generateImage = async () => {
+const shareStore = useShareStore();
+
+const handleGenerateImageClick = () => {
     // Construct RenderedTurn array for the generator
-    // We can map renderedConversation directly, ensuring type compatibility
     const turnsForImage = renderedConversation.value.map(turn => ({
         ...turn,
-    })) as any[]; // Cast to any to avoid strict type mismatch on 'answer' which might technically be Promise<string> to TS but is string here.
+    })) as any[];
     
-    await generateAndDownloadImage(selectionState.value, turnsForImage);
+    // Prepare data
+    const data = prepareShareData(selectionState.value, turnsForImage);
+    if (data.length === 0) return;
+    
+    // Save to store
+    shareStore.setPreviewTurns(data);
+    
+    // Open preview in new tab
+    window.open('/share-preview', '_blank');
 };
 
 const isAllSelected = computed(() => {
@@ -622,7 +632,7 @@ onUnmounted(() => {
         <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
         <button @click="handleCheckFormatting" :disabled="selectionState.length === 0" title="检查选中内容是否有Markdown格式问题">修复格式</button>
         <button @click="handleDeleteSelected" :disabled="selectionState.length === 0" class="danger-btn">删除</button>
-        <button @click="generateImage" :disabled="selectionState.length === 0">分享</button>
+        <button @click="handleGenerateImageClick" :disabled="selectionState.length === 0">分享</button>
       </div>
     </div>
     <div class="viewer-content">
@@ -687,10 +697,7 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- Hidden container for image generation -->
-  <div id="share-container" style="position: absolute; visibility: hidden; background: white; padding: 20px; width: 800px;">
-    <!-- Content is now injected dynamically via generateImage function -->
-  </div>
+
 
   <!-- Markdown Fix Preview Modal -->
   <div v-if="showFixModal" class="modal-overlay">
