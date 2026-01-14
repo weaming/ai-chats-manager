@@ -10,10 +10,13 @@ const draggedTurnState = ref<{
     sourceFilePath?: string;
 } | null>(null);
 
+const dropTargetKey = ref<string | null>(null);
+
 export function useDragDrop() {
   return {
     sourceParentHandle,
     draggedEntryName,
-    draggedTurnState
+    draggedTurnState,
+    dropTargetKey
   };
 }

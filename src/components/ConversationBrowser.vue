@@ -23,9 +23,12 @@ const emitter = useEventBus();
 const fileTree = ref<FileSystemEntry[]>([]);
 const isLoading = ref(false);
 const emit = defineEmits(['file-click', 'file-deleted']);
-const isDragOverRoot = ref(false);
 
-const { sourceParentHandle: dragSourceParentHandle } = useDragDrop();
+const { 
+    sourceParentHandle: dragSourceParentHandle,
+    draggedTurnState,
+    dropTargetKey
+} = useDragDrop();
 
 const chatsDirHandle = ref<FileSystemDirectoryHandle | null>(null);
 const isSelectionMode = ref(false);
@@ -285,7 +288,7 @@ const handleTurnDrop = async ({ targetEntry, turnData, sourceIndices }: { target
 const handleRootDragOver = (event: DragEvent) => {
     event.preventDefault();
     if (dragSourceParentHandle.value) {
-        isDragOverRoot.value = true;
+        dropTargetKey.value = 'root';
     }
 };
 
@@ -299,13 +302,15 @@ const handleRootDragLeave = (event: DragEvent) => {
         return;
     }
     
-    isDragOverRoot.value = false;
+    if (dropTargetKey.value === 'root') {
+        dropTargetKey.value = null;
+    }
 };
 
 
 const handleRootDrop = async (event: DragEvent) => {
     event.preventDefault();
-    isDragOverRoot.value = false;
+    dropTargetKey.value = null;
 
     if (!dragSourceParentHandle.value || !chatsDirHandle.value) return;
 
@@ -324,6 +329,12 @@ const handleRootDrop = async (event: DragEvent) => {
             console.warn("Invalid drop data", e);
         }
     }
+};
+
+const handleGlobalDragEnd = () => {
+    dragSourceParentHandle.value = null;
+    dropTargetKey.value = null;
+    draggedTurnState.value = null;
 };
 
 const handleKeyDown = (event: KeyboardEvent) => {
@@ -367,10 +378,12 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 onMounted(() => {
     emitter.$on('file-system-changed', loadFileTree);
+    window.addEventListener('dragend', handleGlobalDragEnd);
 });
 
 onUnmounted(() => {
     emitter.$off('file-system-changed', loadFileTree);
+    window.removeEventListener('dragend', handleGlobalDragEnd);
 });
 
 watch(rootHandle, loadFileTree, { immediate: true });
@@ -401,7 +414,7 @@ watch(() => props.selectedFile, focusSelectedItem);
 
     <div 
       class="file-list-container"
-      :class="{ 'drop-target': isDragOverRoot }"
+      :class="{ 'drop-target': dropTargetKey === 'root' }"
       @dragover="handleRootDragOver"
       @dragleave="handleRootDragLeave"
       @drop="handleRootDrop"

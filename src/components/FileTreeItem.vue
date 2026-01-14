@@ -29,7 +29,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['file-click', 'delete-entry', 'rename-entry', 'move-entry', 'turn-drop']);
-const dropTargetName = ref<string | null>(null);
 const editingName = ref<string | null>(null); // name of entry being edited
 const editValue = ref('');
 const renameInput = ref<HTMLInputElement | null>(null);
@@ -95,7 +94,7 @@ const cancelRename = async () => {
 
 // --- Drag and Drop Handlers ---
 
-const { draggedTurnState } = useDragDrop();
+const { draggedTurnState, dropTargetKey } = useDragDrop();
 
 const handleFileDragOver = (event: DragEvent, entry: FileEntry) => {
     // Check if dragging a turn
@@ -103,7 +102,7 @@ const handleFileDragOver = (event: DragEvent, entry: FileEntry) => {
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer!.dropEffect = 'move';
-        dropTargetName.value = entry.name;
+        dropTargetKey.value = entry.name;
     }
 };
 
@@ -111,7 +110,7 @@ const handleFileDrop = (event: DragEvent, entry: FileEntry) => {
     if (draggedTurnState.value) {
         event.preventDefault();
         event.stopPropagation(); // Prevent bubbling to root
-        dropTargetName.value = null;
+        dropTargetKey.value = null;
         emit('turn-drop', { 
             targetEntry: entry, 
             turnData: draggedTurnState.value.data,
@@ -134,13 +133,13 @@ const handleDragStart = (event: DragEvent, entry: FileSystemEntry) => {
 
 const handleDragEnd = () => {
     dragSourceParentHandle.value = null;
-    dropTargetName.value = null;
+    dropTargetKey.value = null;
 };
 
 const handleDragOver = (event: DragEvent, entry: FileSystemEntry) => {
   event.preventDefault();
   if (entry.kind === 'directory') {
-    dropTargetName.value = entry.name;
+    dropTargetKey.value = entry.name;
   }
 };
 
@@ -171,15 +170,15 @@ const handleItemDragLeave = (event: DragEvent, entry: FileSystemEntry) => {
    const related = event.relatedTarget as HTMLElement;
    if (related && target.contains(related)) return; // Still inside
    
-   if (dropTargetName.value === entry.name) {
-       dropTargetName.value = null;
+   if (dropTargetKey.value === entry.name) {
+       dropTargetKey.value = null;
    }
 };
 
 const handleDrop = (event: DragEvent, targetEntry: FileSystemEntry) => {
   event.preventDefault();
   event.stopPropagation();
-  dropTargetName.value = null;
+  dropTargetKey.value = null;
   
   if (event.dataTransfer && dragSourceParentHandle.value) {
     const data = JSON.parse(event.dataTransfer.getData('text/plain'));
@@ -225,7 +224,7 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
       v-for="entry in entries" 
       :key="entry.name" 
       :class="['tree-item', entry.kind, { 
-          'drop-target': dropTargetName === entry.name && entry.kind === 'directory',
+          'drop-target': dropTargetKey === entry.name && entry.kind === 'directory',
           'active': entry.kind === 'file' && selectedFile?.name === entry.name 
       }]"
       :draggable="entry.kind === 'file' && editingName !== entry.name"
@@ -242,7 +241,7 @@ const handleChildFileClick = (event: { entry: FileEntry, path: string, parentHan
         :tabindex="editingName === entry.name ? -1 : 0"
         :class="{ 
             'active': entry.kind === 'file' && selectedFile?.name === entry.name,
-            'drop-target': dropTargetName === entry.name
+            'drop-target': dropTargetKey === entry.name
         }"
         @click="handleItemClick(entry)"
         @dblclick.prevent.stop="handleRenameClick(entry)"
