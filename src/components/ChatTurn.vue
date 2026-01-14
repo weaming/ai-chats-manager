@@ -31,6 +31,10 @@ const props = defineProps({
     selection: {
         type: Object as PropType<SelectionState | undefined>,
         default: undefined,
+    },
+    layoutMode: {
+        type: String as PropType<'default' | 'export'>,
+        default: 'default'
     }
 });
 
@@ -118,29 +122,36 @@ const handleCancel = () => {
 <template>
     <div 
         class="chat-turn" 
+        :class="[`mode-${layoutMode}`]"
         ref="rootEl"
         :draggable="!isEditing"
         @dragstart="handleDragStart"
         @dragend="handleDragEnd"
     >
         <!-- Left Column: Controls -->
-        <div class="turn-controls">
+        <!-- Only show controls if in default mode or editing/drag active context -->
+        <div class="turn-controls" v-if="layoutMode === 'default' || isEditing">
             <template v-if="!isEditing">
-                <span v-if="turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
+                <span v-if="layoutMode === 'default' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
                 <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
                 <button class="delete-btn" @click.stop="$emit('delete')" title="删除此回合">🗑️</button>
             </template>
         </div>
-
+        <!-- In export mode with internal numbering, we can hide the sidebar column to save space -->
+        
         <!-- Right Column: Content -->
         <div class="turn-content">
             <!-- Viewing Mode -->
             <div v-if="!isEditing" @click="$emit('toggle-selection')">
                 <div v-if="turn.question && turn.question.trim().length > 0" class="chat-bubble question"
                     @click.stop="$emit('toggle-question-selection')">
-                    <div class="bubble-content" :class="{ active: selection?.question }">{{ turn.question }}</div>
+                    <div class="bubble-content question-content" :class="{ active: selection?.question }">
+                         <!-- Export Mode: Number in Bubble -->
+                        <span v-if="layoutMode === 'export' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
+                        <span class="question-text">{{ turn.question }}</span>
+                    </div>
                 </div>
-                <div class="chat-bubble answer">
+                <div v-if="turn.answer" class="chat-bubble answer">
                     <div class="bubble-content markdown-body" :class="{ active: selection?.answer }"
                         v-html="turn.answer"></div>
                 </div>
@@ -253,6 +264,17 @@ const handleCancel = () => {
 
 .bubble-content.active {
     border-color: var(--primary-color);
+}
+
+.question-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.question-text {
+    flex-grow: 1;
+    word-break: break-word;
 }
 
 .question-number {
