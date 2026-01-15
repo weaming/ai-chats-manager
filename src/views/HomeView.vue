@@ -3,12 +3,14 @@ import { ref, onMounted } from 'vue';
 import NewConversation from '../components/NewConversation.vue';
 import ConversationBrowser from '../components/ConversationBrowser.vue';
 import ConversationViewer from '../components/ConversationViewer.vue';
+import AboutModal from '../components/AboutModal.vue';
 import type { FileEntry } from '../composables/useFileSystem';
 import { useFileSystem } from '../composables/useFileSystem';
 
 const selectedFile = ref<FileEntry | null>(null);
 const sidebarWidth = ref(550);
 const isResizing = ref(false);
+const showAbout = ref(false);
 const { findFileByPath, findLatestFile } = useFileSystem();
 
 const handleFileSelected = (event: { entry: FileEntry, path: string }) => {
@@ -78,7 +80,10 @@ const stopResizing = () => {
 <template>
   <div class="home-view" :class="{ 'is-resizing': isResizing }">
     <header class="app-header">
-      <h1>AI对话管理</h1>
+      <div class="header-title">
+        <h1>AI对话管理</h1>
+        <a href="#" class="about-link" @click.prevent="showAbout = true">about</a>
+      </div>
       <button @click="showNewConversation" class="new-btn">新建对话</button>
     </header>
     <main class="app-container">
@@ -95,6 +100,8 @@ const stopResizing = () => {
         <NewConversation v-else @conversation-created="handleFileSelected" />
       </div>
     </main>
+
+    <AboutModal v-if="showAbout" @close="showAbout = false" />
   </div>
 </template>
 
@@ -124,6 +131,24 @@ const stopResizing = () => {
 .app-header h1 {
   margin: 0;
   font-size: 1.5rem;
+  color: var(--primary-color);
+}
+
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.about-link {
+  font-size: 0.8rem;
+  color: #999;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.about-link:hover {
+  text-decoration: underline;
   color: var(--primary-color);
 }
 
