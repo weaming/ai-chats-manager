@@ -408,4 +408,140 @@ const handleCancel = () => {
   background-color: #f8f8f8;
   font-weight: bold;
 }
+
+/* Export Mode Adjustments - Match Gemini Official Design */
+.chat-turn.mode-export .bubble-content {
+  font-size: 16px;
+  line-height: 26px;
+  padding: 16px 20px;
+  color: #1f1f1f;
+}
+
+.chat-turn.mode-export .question-content {
+  font-size: 16px;
+  line-height: 26px;
+}
+
+.chat-turn.mode-export .answer .bubble-content {
+  font-size: 16px;
+  line-height: 26px;
+}
+
+/* Markdown content in export mode - Gemini Official Styles */
+.chat-turn.mode-export :deep(.markdown-body) {
+  font-size: 16px;
+  line-height: 26px;
+  color: #1f1f1f;
+}
+
+.chat-turn.mode-export :deep(.markdown-body h1) {
+  font-size: 16px;
+  line-height: 22px;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 700;
+}
+
+.chat-turn.mode-export :deep(.markdown-body h2) {
+  font-size: 16px;
+  line-height: 22px;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 700;
+}
+
+.chat-turn.mode-export :deep(.markdown-body h3) {
+  font-size: 16px;
+  line-height: 22px;
+  margin-top: 0.8em;
+  margin-bottom: 0.5em;
+  font-weight: 700;
+}
+
+.chat-turn.mode-export :deep(.markdown-body h4) {
+  font-size: 16px;
+  line-height: 22px;
+  margin-top: 0.8em;
+  margin-bottom: 0.5em;
+  font-weight: 700;
+}
+
+.chat-turn.mode-export :deep(.markdown-body p) {
+  font-size: 16px;
+  line-height: 26px;
+  margin-bottom: 1em;
+  font-weight: 400;
+}
+
+.chat-turn.mode-export :deep(.markdown-body ul),
+.chat-turn.mode-export :deep(.markdown-body ol) {
+  font-size: 16px;
+  line-height: 26px;
+  margin-bottom: 1em;
+  padding-left: 2em;
+}
+
+.chat-turn.mode-export :deep(.markdown-body li) {
+  font-size: 16px;
+  line-height: 26px;
+  margin-bottom: 0.3em;
+  font-weight: 400;
+}
+
+.chat-turn.mode-export :deep(.markdown-body ol p),
+.chat-turn.mode-export :deep(.markdown-body li p) {
+  margin: 0;
+}
+
+.chat-turn.mode-export :deep(.markdown-body code) {
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.875em;
+  background-color: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.chat-turn.mode-export :deep(.markdown-body pre) {
+  background-color: #f6f8fa;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.chat-turn.mode-export :deep(.markdown-body pre code) {
+  background-color: transparent;
+  padding: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.chat-turn.mode-export :deep(.markdown-body strong),
+.chat-turn.mode-export :deep(.markdown-body b) {
+  font-weight: 700;
+}
+
+.chat-turn.mode-export :deep(.markdown-body em) {
+  font-style: italic;
+}
+
+.chat-turn.mode-export :deep(.markdown-body blockquote) {
+  border-left: 3px solid #d0d7de;
+  padding-left: 1em;
+  margin-left: 0;
+  color: #57606a;
+}
+
+/* Table styles for export mode - Match Gemini */
+.chat-turn.mode-export :deep(.markdown-body table) {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.chat-turn.mode-export :deep(.markdown-body th),
+.chat-turn.mode-export :deep(.markdown-body td) {
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 12px;
+}
 </style>
