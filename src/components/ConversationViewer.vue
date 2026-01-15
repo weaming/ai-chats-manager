@@ -101,12 +101,7 @@ const cancelEditing = () => {
     editingTurn.value = null;
 };
 
-// ESC 键取消编辑
-const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && editingTurn.value !== null) {
-        cancelEditing();
-    }
-};
+
 
 
 const saveEditing = async (index: number, payload: { question: string | null; answer: string }) => {
@@ -253,7 +248,9 @@ const handleDragOver = (event: DragEvent, index: number) => {
     event.preventDefault(); // Allow drop
     event.dataTransfer!.dropEffect = 'move';
     
-    dropTargetIndex.value = index;
+    if (dropTargetIndex.value !== index) {
+        dropTargetIndex.value = index;
+    }
     // We could add helper visual here, but let's stick to simple replacement logic for now
 };
 
@@ -271,11 +268,14 @@ const handleTurnDragStart = (event: DragEvent, index: number) => {
         indicesToDrag = selectionState.value.map(s => s.index).sort((a, b) => a - b);
     }
     
-    // Set global state
-    draggedTurnState.value = {
-        indices: indicesToDrag,
-        data: indicesToDrag.map(i => conversation.value[i]), // Full data
-    };
+    // Set global state with slight delay to prevent drag cancellation due to layout shift
+    // (Browser needs to initialize drag image from current DOM geometry before we compact it)
+    setTimeout(() => {
+        draggedTurnState.value = {
+            indices: indicesToDrag,
+            data: indicesToDrag.map(i => conversation.value[i]), // Full data
+        };
+    }, 0);
     
     // Set dataTransfer
     if (event.dataTransfer) {
@@ -290,12 +290,16 @@ const handleDrop = async (event: DragEvent, dropIndex: number) => {
      event.preventDefault();
      dropTargetIndex.value = null;
 
-     if (!draggedTurnState.value) return;
+     if (!draggedTurnState.value) {
+         return;
+     }
 
      const sourceIndices = draggedTurnState.value.indices;
      
      // 1. Validate: Cannot drop ON any of the source items (no-op)
-     if (sourceIndices.includes(dropIndex)) return;
+     if (sourceIndices.includes(dropIndex)) {
+         return;
+     }
 
      // Perform Reorder
      const newConversation = [...conversation.value];
@@ -539,6 +543,30 @@ const handleDeleteSelected = async () => {
     }
 };
 
+// ESC 键取消编辑
+const handleKeyDown = (event: KeyboardEvent) => {
+    // 1. ESC to cancel editing OR clear selection
+    if (event.key === 'Escape') {
+        if (editingTurn.value !== null) {
+             cancelEditing();
+             return;
+        }
+        if (selectionState.value.length > 0) {
+            selectionState.value = [];
+            return;
+        }
+    }
+
+    // 2. Delete/Backspace to delete selected items
+    // Only if not in an input/textarea and not editing a turn
+    const target = event.target as HTMLElement;
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !isInput && selectionState.value.length > 0) {
+        handleDeleteSelected();
+    }
+};
+
 const currentQuestion = ref('');
 const currentAnswer = ref('');
 
@@ -638,7 +666,7 @@ onUnmounted(() => {
     <div class="viewer-content">
       <div v-if="isLoading" class="status-message">正在加载对话...</div>
       <div v-else-if="error" class="status-message error"><strong>加载失败:</strong> {{ error }}</div>
-      <div v-else class="chat-log" @dragend="handleGlobalDragEnd">
+      <div v-else class="chat-log" :class="{ 'is-dragging': !!draggedTurnState }" @dragend="handleGlobalDragEnd">
         <ChatTurn 
           v-for="(turn, index) in renderedConversation" 
           :key="(turn.id as any)"
@@ -659,7 +687,9 @@ onUnmounted(() => {
           @dragstart="handleTurnDragStart($event, index)"
           @dragover="handleDragOver($event, index)"
           @drop="handleDrop($event, index)"
-          :style="{ opacity: dropTargetIndex === index ? 0.5 : 1, borderTop: dropTargetIndex === index ? '2px solid var(--primary-color)' : 'none' }"
+          :is-global-dragging="!!draggedTurnState"
+          :class="{ 'drop-target': dropTargetIndex === index }"
+          :style="{ opacity: dropTargetIndex === index ? 0.5 : 1 }"
         />
         
         <!-- End Drop Zone -->
@@ -1103,7 +1133,33 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 40px; /* Increase spacing between turns */
+    padding-top: 10px; /* Ensure space for first item drop indicator */
 }
+
+/* Global dragging state styles */
+.chat-log.is-dragging {
+    gap: 10px; /* Reduced gap during drag */
+}
+
+/* ChatTurn styles (Deep selector or if ChatTurn is root, we can style it via class passed from parent) */
+/* Since ChatTurn is a component, the class 'drop-target' falls through to its root element */
+:deep(.chat-turn) {
+    position: relative;
+    /* Ensure transition for gap change if possible? No, gap is on parent. */
+}
+
+:deep(.chat-turn.drop-target::before) {
+    content: '';
+    position: absolute;
+    top: -5px; /* Half of 10px gap */
+    left: 0;
+    right: 0;
+    height: 2px;
+    background-color: var(--primary-color);
+    z-index: 10;
+    pointer-events: none;
+}
+
 
 </style>
 

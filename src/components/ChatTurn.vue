@@ -35,6 +35,10 @@ const props = defineProps({
     layoutMode: {
         type: String as PropType<'default' | 'export'>,
         default: 'default'
+    },
+    isGlobalDragging: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -105,6 +109,8 @@ const handleDragEnd = () => {
         rootEl.value.classList.remove('dragging');
     }
     // Always clear global state on drag end to prevent stuck state
+    // We can also delay this slightly if needed, but usually instant clear is fine.
+    // However, if we delayed start, let's keep end instant to restore view ASAP.
     draggedTurnState.value = null;
 };
 
@@ -124,7 +130,7 @@ const handleCancel = () => {
 <template>
     <div 
         class="chat-turn" 
-        :class="[`mode-${layoutMode}`]"
+        :class="[`mode-${layoutMode}`, { 'compact-mode': isGlobalDragging }]"
         ref="rootEl"
         :draggable="!isEditing"
         @dragstart="handleDragStart"
@@ -135,10 +141,12 @@ const handleCancel = () => {
         <div class="turn-controls" v-if="layoutMode === 'default' || isEditing">
             <template v-if="!isEditing">
                 <span v-if="layoutMode === 'default' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
-                <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
-                <button class="move-btn move-up-btn" @click.stop="$emit('move-up')" title="上移">⬆️</button>
-                <button class="move-btn move-down-btn" @click.stop="$emit('move-down')" title="下移">⬇️</button>
-                <button class="delete-btn" @click.stop="$emit('delete')" title="删除此回合">🗑️</button>
+                <!-- Hide actions during global drag -->
+                <template v-if="!isGlobalDragging">
+                    <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+                    <button class="move-btn move-up-btn" @click.stop="$emit('move-up')" title="上移">⬆️</button>
+                    <button class="move-btn move-down-btn" @click.stop="$emit('move-down')" title="下移">⬇️</button>
+                </template>
             </template>
         </div>
         <!-- In export mode with internal numbering, we can hide the sidebar column to save space -->
@@ -155,9 +163,21 @@ const handleCancel = () => {
                         <span class="question-text">{{ turn.question }}</span>
                     </div>
                 </div>
-                <div v-if="turn.answer" class="chat-bubble answer">
-                    <div class="bubble-content markdown-body" :class="{ active: selection?.answer }"
+                
+                <!-- Normal Answer View: Show if NOT dragging OR if dragging but no question (we'll show snippet instead handled below) -->
+                <!-- Actually user said: "If no question, show first line of text". "If question exists, hide answer". -->
+                
+                <div v-if="turn.answer && (!isGlobalDragging || (!turn.question && isGlobalDragging))" class="chat-bubble answer" 
+                    :class="{ 'compact-view': isGlobalDragging }">
+                    
+                    <!-- Standard Markdown View -->
+                    <div v-if="!isGlobalDragging" class="bubble-content markdown-body" :class="{ active: selection?.answer }"
                         v-html="turn.answer"></div>
+                        
+                    <!-- Dragging View: Snippet only if NO question (otherwise hidden entirely by v-if above) -->
+                    <div v-else class="bubble-content snippet-content" :class="{ active: selection?.answer }">
+                        {{ (turn.answer || '').split('\n')[0]?.substring(0, 100) }}...
+                    </div>
                 </div>
             </div>
 
@@ -255,22 +275,7 @@ const handleCancel = () => {
   transform: scale(1.2);
 }
 
-.delete-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 5px 0;
-  margin-top: 5px;
-  color: #dee2e6; /* Very light gray, almost invisible */
-  opacity: 0; /* Fully transparent by default */
-  transition: all 0.2s ease;
-}
 
-.chat-turn:hover .delete-btn {
-    opacity: 1; /* Show on hover */
-    color: #dc3545; /* Red on hover */
-}
 
 .chat-bubble {
   display: flex;
@@ -521,6 +526,26 @@ const handleCancel = () => {
   font-weight: 700;
 }
 
+/* Compact Mode for Dragging */
+.chat-turn.compact-mode {
+    gap: 5px; /* Reduced from 15px */
+    margin-bottom: 4px; /* Tighter list */
+}
+
+.chat-turn.compact-mode .chat-bubble.question {
+    margin-bottom: 4px; /* Reduced from 15px */
+}
+
+.chat-turn.compact-mode .bubble-content {
+    padding: 8px 12px; /* Slightly reduced padding */
+    min-height: auto;
+}
+
+/* Ensure number stays aligned */
+.chat-turn.compact-mode .turn-controls {
+    padding-top: 10px; 
+}
+
 .chat-turn.mode-export :deep(.markdown-body em) {
   font-style: italic;
 }
@@ -543,5 +568,15 @@ const handleCancel = () => {
   font-size: 14px;
   line-height: 20px;
   padding: 8px 12px;
+}
+
+.snippet-content {
+    color: #6c757d;
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 8px 18px; /* Reduced padding */
+    background-color: #f8f9fa;
 }
 </style>
