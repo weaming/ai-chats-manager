@@ -54,13 +54,14 @@ const curatedThemeList = [
 
 // Helper to normalize paths for matching
 const normalizePath = (p: string) => {
-    return p.replace('/node_modules/highlight.js/styles/', '')
-            .replace('../../node_modules/highlight.js/styles/', '');
+    // Handle both /node_modules/... and ../../node_modules/...
+    return p.split('/node_modules/highlight.js/styles/').pop() || p;
 };
 
 // Helper to get friendly name (remove .css and capitalize)
 const formatThemeName = (path: string) => {
-    return path.replace('.css', '').replace(/-/g, ' ').split('/').pop() || path;
+    const normalized = normalizePath(path);
+    return normalized.replace('.css', '').replace(/-/g, ' ').split('/').pop() || normalized;
 };
 
 const currentTheme = ref('atom-one-light.css');

@@ -25,7 +25,7 @@ const emit = defineEmits<{
 // Constants
 const STORAGE_KEY = 'smart-toc-settings';
 const DEFAULT_WIDTH = 500;
-const DEFAULT_POSITION = { x: 20, y: 15 }; // y: 15 to align with viewer-content padding/header
+const DEFAULT_POSITION = { x: 45, y: 100 }; // Default position, pushed in and down
 
 // State
 const position = ref({ ...DEFAULT_POSITION });

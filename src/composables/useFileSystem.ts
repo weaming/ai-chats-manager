@@ -2,7 +2,6 @@ import { ref, readonly, watch } from 'vue';
 import { useEventBus } from './useEventBus';
 import { get, set } from '../utils/indexedDB';
 import { getSubDirectoryHandle, calculateHash, moveFile } from '../utils/fileSystemUtils';
-import { migrateDataV2 } from './useDataMigration';
 import { useConversationIO } from './useConversationIO';
 
 // --- Interfaces for File System Entries and Conversation Data ---
@@ -52,7 +51,6 @@ async function loadHandleFromIndexedDB() {
             const options = { mode: 'readwrite' as const };
             if (await handle.queryPermission(options) === 'granted') {
                 rootHandle.value = handle;
-                await migrateDataV2(rootHandle.value); // Run migration after getting handle
                 emitter.$emit('file-system-changed');
             } else {
                  console.warn("Permission for stored directory handle was not granted.");

@@ -2,12 +2,10 @@
 import { onMounted, ref } from 'vue';
 import { useShareStore } from '../stores/shareStore';
 import SharePreview from '../components/SharePreview.vue';
+import ThemeSelector from '../components/ThemeSelector.vue';
 import { downloadElementAsPng } from '../utils/imageGenerator';
-import { useTheme } from '../composables/useTheme';
-
 const shareStore = useShareStore();
 const dlLoading = ref(false);
-const { availableThemes, currentTheme, applyTheme, showAllThemes } = useTheme();
 
 onMounted(() => {
     shareStore.loadFromStorage();
@@ -44,24 +42,7 @@ const handleClose = () => {
       <div class="toolbar-content">
         <h2>分享预览</h2>
         <div class="actions">
-          <label class="toggle-all-themes">
-            <input type="checkbox" v-model="showAllThemes" />
-            <span style="font-size: 14px; margin: 0 8px; color: #495057; display: flex; align-items: center;">全部代码主题</span>
-          </label>
-          <select 
-            :value="currentTheme" 
-            @change="(e) => applyTheme((e.target as HTMLSelectElement).value)"
-            class="theme-select"
-          >
-            <option 
-              v-for="theme in availableThemes" 
-              :key="theme.value" 
-              :value="theme.value"
-              :disabled="(theme as any).disabled"
-            >
-              {{ theme.name }}
-            </option>
-          </select>
+          <ThemeSelector />
           <button class="secondary-btn" @click="handleClose">关闭</button>
           <button class="primary-btn" @click="handleDownload" :disabled="dlLoading">
             {{ dlLoading ? '生成中...' : '下载图片' }}
@@ -141,16 +122,6 @@ const handleClose = () => {
   color: #adb5bd;
 }
 
-.primary-btn {
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 500;
-}
-
 .primary-btn:hover {
   filter: brightness(90%);
 }
@@ -167,23 +138,5 @@ const handleClose = () => {
   cursor: pointer;
 }
 
-.theme-select {
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid #ced4da;
-  background-color: white;
-  font-size: 14px;
-  color: #495057;
-  cursor: pointer;
-  outline: none;
-}
-.theme-select:focus {
-  border-color: var(--primary-color);
-}
 
-.toggle-all-themes {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
 </style>

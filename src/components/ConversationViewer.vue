@@ -10,6 +10,7 @@ import { fixMarkdownSpacing } from '../utils/markdownUtils'; // Import fix utili
 import { diffChars, type DiffPart } from '../utils/simpleDiff';
 import ChatTurn from './ChatTurn.vue';
 import TOC from './TOC.vue';
+import ThemeSelector from './ThemeSelector.vue';
 import { useTheme } from '../composables/useTheme';
 
 interface Selection {
@@ -26,7 +27,7 @@ const props = defineProps({
 });
 
 const { readConversation, updateConversation } = useFileSystem();
-const { availableThemes, currentTheme, applyTheme, showAllThemes } = useTheme();
+const { currentTheme } = useTheme();
 const conversation = ref<(FullConversationTurn & { id?: symbol })[]>([]);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
@@ -797,34 +798,19 @@ onUnmounted(() => {
     <div class="viewer-header">
       <h2>{{ formattedFileName }}</h2>
       <div style="display: flex; gap: 10px; align-items: center;">
-        <!-- Theme Selector -->
-        <div class="theme-controls">
-          <label class="toggle-all-themes">
-            <input type="checkbox" v-model="showAllThemes" />
-            <span class="label-text">全部代码主题</span>
-          </label>
-          <select 
-            :value="currentTheme" 
-            @change="(e) => applyTheme((e.target as HTMLSelectElement).value)"
-            class="theme-select"
-            title="选择代码高亮主题"
-          >
-            <option 
-              v-for="theme in availableThemes" 
-              :key="theme.value" 
-              :value="theme.value"
-              :disabled="(theme as any).disabled"
-            >
-              {{ theme.name }}
-            </option>
-          </select>
+        <ThemeSelector class="action-group" />
+        
+        <div class="action-group">
+          <button @click="toggleSortingMode" :class="{ 'active-btn': isSortingMode }">{{ isSortingMode ? '退出排序' : '排序' }}</button>
+          <button @click="handleSelectAll" :disabled="isAllSelected">全选</button>
+          <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
         </div>
 
-        <button @click="toggleSortingMode" :class="{ 'active-btn': isSortingMode }">{{ isSortingMode ? '退出排序' : '排序' }}</button>
-        <button @click="handleSelectAll" :disabled="isAllSelected">全选</button>
-        <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
-        <button @click="handleCheckFormatting" :disabled="selectionState.length === 0" title="检查选中内容是否有Markdown格式问题">修复格式</button>
-        <button @click="handleDeleteSelected" :disabled="selectionState.length === 0" class="danger-btn">删除</button>
+        <div class="action-group">
+          <button @click="handleCheckFormatting" :disabled="selectionState.length === 0" title="检查选中内容是否有Markdown格式问题">修复格式</button>
+          <button @click="handleDeleteSelected" :disabled="selectionState.length === 0" class="danger-btn">删除</button>
+        </div>
+
         <button @click="handleGenerateImageClick" :disabled="selectionState.length === 0">分享</button>
       </div>
     </div>
@@ -1293,43 +1279,16 @@ onUnmounted(() => {
     padding: 20px;
     border-radius: 8px;
 }
-/* Theme Controls */
-.theme-controls {
+.action-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin-right: 8px;
     border-right: 1px solid #e9ecef;
     padding-right: 12px;
 }
 
-.theme-select {
-    padding: 6px 10px;
-    border-radius: 4px;
-    border: 1px solid #ced4da;
-    background-color: white;
-    font-size: 13px;
-    color: #495057;
-    cursor: pointer;
-    outline: none;
-    max-width: 140px;
-}
-.theme-select:focus {
-    border-color: var(--primary-color);
-}
 
-.toggle-all-themes {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.toggle-all-themes .label-text {
-    font-size: 13px;
-    margin-left: 4px;
-    color: #6c757d;
-}
 
 .input-group {
     display: flex;
