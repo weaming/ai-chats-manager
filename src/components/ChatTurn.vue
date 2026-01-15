@@ -40,6 +40,10 @@ const props = defineProps({
     isGlobalDragging: {
         type: Boolean,
         default: false
+    },
+    index: {
+        type: Number,
+        required: true
     }
 });
 
@@ -154,6 +158,7 @@ const handleCancel = () => {
     <div 
         class="chat-turn" 
         :class="[`mode-${layoutMode}`, { 'compact-mode': isGlobalDragging }]"
+        :id="'turn-' + index"
         ref="rootEl"
         :draggable="!isEditing"
         @dragstart="handleDragStart"
@@ -391,9 +396,11 @@ const handleCancel = () => {
     border-radius: 4px;
     border: 1px solid #ced4da;
     font-family: inherit;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 1rem;
+    line-height: 1.6;
     resize: vertical;
+    box-sizing: border-box;
+    overflow-x: hidden;
 }
 .editing-group textarea.answer-textarea {
     flex-grow: 1;

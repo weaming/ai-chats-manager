@@ -46,7 +46,7 @@ const handleClose = () => {
         <div class="actions">
           <label class="toggle-all-themes">
             <input type="checkbox" v-model="showAllThemes" />
-            <span style="font-size: 14px; margin: 0 8px; color: #495057; display: flex; align-items: center;">全部主题</span>
+            <span style="font-size: 14px; margin: 0 8px; color: #495057; display: flex; align-items: center;">全部代码主题</span>
           </label>
           <select 
             :value="currentTheme" 

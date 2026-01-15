@@ -29,6 +29,7 @@ defineProps<{
       <ChatTurn 
         :turn="item.turn" 
         :raw-turn="item.turn" 
+        :index="item.turn.index"
         layout-mode="export"
       />
     </div>

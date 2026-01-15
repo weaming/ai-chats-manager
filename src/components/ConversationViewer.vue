@@ -9,6 +9,7 @@ import { useShareStore } from '../stores/shareStore';
 import { fixMarkdownSpacing } from '../utils/markdownUtils'; // Import fix utility
 import { diffChars, type DiffPart } from '../utils/simpleDiff';
 import ChatTurn from './ChatTurn.vue';
+import TOC from './TOC.vue';
 import { useTheme } from '../composables/useTheme';
 
 interface Selection {
@@ -208,6 +209,25 @@ interface FixPreviewItem {
 }
 const fixPreviewData = ref<FixPreviewItem[]>([]);
 
+const tocItems = computed(() => {
+    return renderedConversation.value
+        .filter(turn => turn.question && turn.question.trim().length > 0)
+        .map(turn => ({
+            index: turn.index,
+            questionNumber: turn.questionNumber,
+            text: getSnippetFromMarkdown(turn.question || '')
+        }));
+});
+
+const getSnippetFromMarkdown = (content: string): string => {
+    if (!content) return '';
+    const html = marked.parse(content) as string;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    return (doc.body.textContent || '').trim().split('\n')[0]?.substring(0, 100) ?? '';
+};
+
+
 const handleCheckFormatting = () => {
     const selectedIndices = selectionState.value.map(s => s.index);
     if (selectedIndices.length === 0) return;
@@ -363,7 +383,6 @@ const handleDrop = async (event: DragEvent, dropIndex: number) => {
      // 5. Optimization: Check if order actually changed
      const isOrderChanged = newConversation.some((turn, index) => turn !== conversation.value[index]);
      if (!isOrderChanged) {
-         console.log('Drop ignored: Order unchanged');
          return;
      }
 
@@ -697,14 +716,79 @@ const handleTransferComplete = async (payload?: { sourceIndices?: number[] }) =>
     }
 };
 
+const activeTurnIndex = ref(-1);
+
+const isJumping = ref(false);
+
+const handleScroll = () => {
+    if (isJumping.value) return;
+    const container = document.querySelector('.viewer-content');
+    if (!container) return;
+
+    const turns = renderedConversation.value.filter(t => t.question && t.question.trim().length > 0);
+    if (turns.length === 0) {
+        activeTurnIndex.value = -1;
+        return;
+    }
+
+    const scrollTop = container.scrollTop;
+    
+    let currentActive = -1;
+    for (const turn of turns) {
+        const el = document.getElementById(`turn-${turn.index}`);
+        if (el) {
+            // Check if turn is at/near the top of the scroll container
+            if (el.offsetTop <= scrollTop + 100) {
+                currentActive = turn.index;
+            } else {
+                break;
+            }
+        }
+    }
+    activeTurnIndex.value = currentActive;
+};
+
+let jumpTimer: ReturnType<typeof setTimeout> | null = null;
+const handleJumpTo = (index: number) => {
+    const container = document.querySelector('.viewer-content');
+    const el = document.getElementById(`turn-${index}`);
+    if (container && el) {
+        if (jumpTimer) clearTimeout(jumpTimer);
+        isJumping.value = true;
+        
+        container.scrollTo({ top: el.offsetTop, behavior: 'smooth' });
+        activeTurnIndex.value = index;
+
+        // Using a longer timeout to cover long smooth scrolls
+        jumpTimer = setTimeout(() => {
+            isJumping.value = false;
+            jumpTimer = null;
+        }, 1500);
+    }
+};
+
 onMounted(() => {
     emitter.$on('turn-transfer-complete', handleTransferComplete);
     window.addEventListener('keydown', handleKeyDown);
+    
+    // Add scroll listener
+    const container = document.querySelector('.viewer-content');
+    if (container) {
+        container.addEventListener('scroll', handleScroll);
+        // Initial check for TOC highlight
+        setTimeout(handleScroll, 100);
+    }
 });
 
 onUnmounted(() => {
     emitter.$off('turn-transfer-complete', handleTransferComplete);
     window.removeEventListener('keydown', handleKeyDown);
+    
+    // Remove scroll listener
+    const container = document.querySelector('.viewer-content');
+    if (container) {
+        container.removeEventListener('scroll', handleScroll);
+    }
 });
 </script>
 
@@ -717,7 +801,7 @@ onUnmounted(() => {
         <div class="theme-controls">
           <label class="toggle-all-themes">
             <input type="checkbox" v-model="showAllThemes" />
-            <span class="label-text">全部主题</span>
+            <span class="label-text">全部代码主题</span>
           </label>
           <select 
             :value="currentTheme" 
@@ -744,6 +828,7 @@ onUnmounted(() => {
         <button @click="handleGenerateImageClick" :disabled="selectionState.length === 0">分享</button>
       </div>
     </div>
+    <TOC :items="tocItems" :active-index="activeTurnIndex" @jump-to="handleJumpTo" />
     <div class="viewer-content">
       <div v-if="isLoading" class="status-message">正在加载对话...</div>
       <div v-else-if="error" class="status-message error"><strong>加载失败:</strong> {{ error }}</div>
@@ -817,12 +902,12 @@ onUnmounted(() => {
           <div class="modal-header">
               <h3>格式修复预览</h3>
                <div class="header-actions">
-                   <label class="toggle-switch">
-                       <input type="checkbox" v-model="showRawDiff">
-                       <span class="slider"></span>
-                       <span class="label-text">显示源码对比</span>
-                   </label>
-                   <button class="close-btn" @click="closeFixModal">×</button>
+                   <button 
+                       :class="['toggle-diff-btn', { 'active': showRawDiff }]" 
+                       @click="showRawDiff = !showRawDiff"
+                   >
+                       {{ showRawDiff ? '源码对比中' : '显示源码对比' }}
+                   </button>
                </div>
           </div>
           <div class="modal-body">
@@ -879,27 +964,29 @@ onUnmounted(() => {
     align-items: center;
 }
 
-.header-actions button {
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  min-width: 100px; /* Wider for easier clicking */
-  display: flex;
-  align-items: center;
-  justify-content: center;
+
+.toggle-diff-btn {
+    background-color: transparent;
+    border: 1px solid #ced4da;
+    color: #495057;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+    white-space: nowrap;
 }
 
-.toggle-switch {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 0.9em;
-    user-select: none;
+.toggle-diff-btn:hover {
+    background-color: #f8f9fa;
+    border-color: #adb5bd;
+}
+
+.toggle-diff-btn.active {
+    background-color: #e6fffa;
+    border-color: #38b2ac;
+    color: #2c7a7b;
+    font-weight: 500;
 }
 
 .code-diff {
@@ -910,7 +997,7 @@ onUnmounted(() => {
     font-family: monospace;
     margin: 0;
     overflow-x: auto;
-    font-size: 1.1em; /* Increased from 0.9em */
+    font-size: 1.25em;
     line-height: 1.6;
 }
 
@@ -978,11 +1065,11 @@ onUnmounted(() => {
 .markdown-preview {
     padding: 10px;
     border-radius: 4px;
-    font-size: 0.85rem;
+    font-size: 1rem;
     margin: 0;
     flex: 1;
     overflow-x: auto;
-    line-height: 1.5;
+    line-height: 1.6;
 }
 
 .diff-box.fixed .markdown-preview {
@@ -1064,13 +1151,6 @@ onUnmounted(() => {
     justify-content: flex-end;
     gap: 10px;
 }
-.close-btn {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    line-height: 1;
-}
 .confirm-btn {
     background: var(--primary-color);
     color: white;
@@ -1104,13 +1184,54 @@ onUnmounted(() => {
   word-break: break-all;
   margin: 0;
 }
-
-.danger-btn {
-    background-color: #dc3545; /* Red */
-    color: white;
+.viewer-header button {
+    background-color: white;
+    border: 1px solid #ced4da;
+    color: #495057;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
 }
+
+.viewer-header button:hover:not(:disabled) {
+    background-color: #f8f9fa;
+    border-color: #adb5bd;
+    color: #212529;
+}
+
+.viewer-header button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f8f9fa;
+}
+
+.viewer-header button.active-btn {
+    background-color: #e7f5ff;
+    border-color: #339af0;
+    color: #1c7ed6;
+    font-weight: 500;
+}
+
+.viewer-header .danger-btn {
+    color: #dc3545;
+    border-color: #f5c2c7;
+}
+
+.viewer-header .danger-btn:hover:not(:disabled) {
+    background-color: #fff5f5;
+    border-color: #dc3545;
+    color: #dc3545;
+}
+
 .danger-btn:disabled {
-    background-color: #e9ecef;
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
     color: #adb5bd;
 }
 
@@ -1122,6 +1243,7 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background-color: #fff;
+  position: relative; /* Positioning context for floating TOC */
 }
 
 .viewer-content {
@@ -1130,6 +1252,7 @@ onUnmounted(() => {
   padding-right: 10px;
   display: flex;
   flex-direction: column;
+  position: relative; /* For absolutely positioned TOC */
 }
 
 .chat-log {
@@ -1221,7 +1344,11 @@ onUnmounted(() => {
     border: 1px solid #ced4da;
     border-radius: 4px;
     font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.6;
     resize: vertical;
+    box-sizing: border-box;
+    overflow-x: hidden;
 }
 
 .input-actions {

@@ -17,6 +17,7 @@ const editingTurn = ref<{ index: number } | null>(null);
 const showImportModal = ref(false);
 const importText = ref('');
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const importTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 // Auto-scroll to bottom when new turn added
 const chatLogRef = ref<HTMLElement | null>(null);
@@ -86,7 +87,19 @@ const cancelEditing = () => {
 
 // ESC 键取消编辑
 const handleKeyDown = (event: KeyboardEvent) => {
-    // ESC to cancel editing a turn
+    // Modals handling
+    if (showImportModal.value) {
+        if (event.key === 'Escape') {
+            closeImportModal();
+            return;
+        }
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            importFromText();
+            return;
+        }
+    }
+
+    // SC to cancel editing a turn
     if (event.key === 'Escape' && editingTurn.value !== null) {
         cancelEditing();
         return;
@@ -147,6 +160,9 @@ const clearAllTurns = () => {
 const openImportModal = () => {
     showImportModal.value = true;
     importText.value = '';
+    nextTick(() => {
+        importTextareaRef.value?.focus();
+    });
 };
 
 const closeImportModal = () => {
@@ -345,12 +361,14 @@ const renderedTurns = computed(() => {
                 />
                 <textarea 
                     v-model="importText" 
+                    ref="importTextareaRef"
                     placeholder="粘贴对话内容..." 
                     class="import-textarea"
                     rows="15"
                 ></textarea>
             </div>
             <div class="modal-footer">
+                <span class="modal-footer-hint">Esc 取消 · Cmd/Ctrl + Enter 导入</span>
                 <button class="cancel-btn" @click="closeImportModal">取消</button>
                 <button class="confirm-btn" @click="importFromText">导入</button>
             </div>
@@ -479,8 +497,10 @@ textarea {
     border-radius: 6px;
     resize: vertical;
     font-family: inherit;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 1rem;
+    line-height: 1.6;
+    box-sizing: border-box;
+    overflow-x: hidden;
 }
 
 textarea:focus {
@@ -671,9 +691,11 @@ textarea:focus {
     border-radius: 6px;
     resize: vertical;
     font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 1rem;
+    line-height: 1.6;
     min-height: 300px;
+    box-sizing: border-box;
+    overflow-x: hidden;
 }
 .import-textarea:focus {
     outline: none;
@@ -684,9 +706,16 @@ textarea:focus {
 .modal-footer {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: 10px;
     padding: 15px 20px;
     border-top: 1px solid var(--border-color);
+}
+
+.modal-footer-hint {
+    font-size: 0.8rem;
+    color: #adb5bd;
+    margin-right: auto;
 }
 
 .cancel-btn,
