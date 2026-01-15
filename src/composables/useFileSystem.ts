@@ -1,4 +1,4 @@
-import { ref, readonly } from 'vue';
+import { ref, readonly, watch } from 'vue';
 import { useEventBus } from './useEventBus';
 import { get, set } from '../utils/indexedDB';
 import { getSubDirectoryHandle, calculateHash, moveFile } from '../utils/fileSystemUtils';
@@ -70,6 +70,13 @@ loadHandleFromIndexedDB();
 export function useFileSystem() {
   
   const conversationIO = useConversationIO(rootHandle, emitter);
+  
+  // Rebuild index whenever rootHandle changes or on init
+  watch(rootHandle, async (val) => {
+      if (val) {
+          await conversationIO.rebuildReferenceIndex();
+      }
+  });
 
   // --- Public API ---
 

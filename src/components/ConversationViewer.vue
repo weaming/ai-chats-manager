@@ -59,6 +59,36 @@ const selectionState = ref<Selection[]>([]);
 
 const getTurnSelection = (index: number) => selectionState.value.find(s => s.index === index);
 
+const isDropRedundant = (dropIndex: number) => {
+    if (!draggedTurnState.value) return true;
+
+    const sourceIndices = draggedTurnState.value.indices;
+    // Dropping on source is redundant
+    if (sourceIndices.includes(dropIndex)) return true;
+
+    // Simulate reorder using indices
+    const currentIndices = conversation.value.map((_, i) => i);
+    const newIndices = [...currentIndices];
+    const itemsToMove: number[] = [];
+
+    // Remove
+    for (let i = sourceIndices.length - 1; i >= 0; i--) {
+        const sourceIndex = sourceIndices[i]!;
+        const [removed] = newIndices.splice(sourceIndex, 1);
+        if (removed !== undefined) itemsToMove.unshift(removed);
+    }
+
+    // Insert
+    let insertIndex = dropIndex;
+    const itemsRemovedBeforeDrop = sourceIndices.filter(idx => idx < dropIndex).length;
+    insertIndex -= itemsRemovedBeforeDrop;
+
+    newIndices.splice(insertIndex, 0, ...itemsToMove);
+
+    // Compare
+    return newIndices.every((val, idx) => val === currentIndices[idx]);
+};
+
 const handleTurnClick = (index: number) => {
     if (editingTurn.value?.index === index) return; // Don't select/deselect while editing
     const selection = getTurnSelection(index);
@@ -140,6 +170,11 @@ const dropTargetIndex = ref<number | null>(null);
 // --- Markdown Fix Logic ---
 const showFixModal = ref(false);
 const showRawDiff = ref(false); // Toggle for Diff View
+const isSortingMode = ref(false);
+
+const toggleSortingMode = () => {
+    isSortingMode.value = !isSortingMode.value;
+};
 
 const handleFixModalKeyDown = (event: KeyboardEvent) => {
     if (!showFixModal.value) return;
@@ -323,6 +358,13 @@ const handleDrop = async (event: DragEvent, dropIndex: number) => {
      // 4. Insert items
      newConversation.splice(insertIndex, 0, ...itemsToMove);
      
+     // 5. Optimization: Check if order actually changed
+     const isOrderChanged = newConversation.some((turn, index) => turn !== conversation.value[index]);
+     if (!isOrderChanged) {
+         console.log('Drop ignored: Order unchanged');
+         return;
+     }
+
      isLoading.value = true;
      try {
          await updateConversation(props.fileHandle, newConversation);
@@ -545,11 +587,18 @@ const handleDeleteSelected = async () => {
 
 // ESC 键取消编辑
 const handleKeyDown = (event: KeyboardEvent) => {
-    // 1. ESC to cancel editing OR clear selection
+    const target = event.target as HTMLElement;
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    // 1. ESC to cancel editing OR clear selection OR exit sorting mode
     if (event.key === 'Escape') {
         if (editingTurn.value !== null) {
              cancelEditing();
              return;
+        }
+        if (isSortingMode.value) {
+            isSortingMode.value = false;
+            return;
         }
         if (selectionState.value.length > 0) {
             selectionState.value = [];
@@ -557,11 +606,17 @@ const handleKeyDown = (event: KeyboardEvent) => {
         }
     }
 
-    // 2. Delete/Backspace to delete selected items
-    // Only if not in an input/textarea and not editing a turn
-    const target = event.target as HTMLElement;
-    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+    // 2. 'e' to edit selected (if single selection)
+    if ((event.key === 'e' || event.key === 'E') && !isInput) {
+        if (editingTurn.value === null && selectionState.value.length === 1) {
+            event.preventDefault();
+            startEditing(selectionState.value[0]!.index);
+            return;
+        }
+    }
 
+    // 3. Delete/Backspace to delete selected items
+    // Only if not in an input/textarea and not editing a turn
     if ((event.key === 'Delete' || event.key === 'Backspace') && !isInput && selectionState.value.length > 0) {
         handleDeleteSelected();
     }
@@ -656,6 +711,7 @@ onUnmounted(() => {
     <div class="viewer-header">
       <h2>{{ formattedFileName }}</h2>
       <div style="display: flex; gap: 10px;">
+        <button @click="toggleSortingMode" :class="{ 'active-btn': isSortingMode }">{{ isSortingMode ? '退出排序' : '排序' }}</button>
         <button @click="handleSelectAll" :disabled="isAllSelected">全选</button>
         <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
         <button @click="handleCheckFormatting" :disabled="selectionState.length === 0" title="检查选中内容是否有Markdown格式问题">修复格式</button>
@@ -666,7 +722,7 @@ onUnmounted(() => {
     <div class="viewer-content">
       <div v-if="isLoading" class="status-message">正在加载对话...</div>
       <div v-else-if="error" class="status-message error"><strong>加载失败:</strong> {{ error }}</div>
-      <div v-else class="chat-log" :class="{ 'is-dragging': !!draggedTurnState }" @dragend="handleGlobalDragEnd">
+      <div v-else class="chat-log" :class="{ 'is-dragging': !!draggedTurnState || isSortingMode }" @dragend="handleGlobalDragEnd">
         <ChatTurn 
           v-for="(turn, index) in renderedConversation" 
           :key="(turn.id as any)"
@@ -687,9 +743,8 @@ onUnmounted(() => {
           @dragstart="handleTurnDragStart($event, index)"
           @dragover="handleDragOver($event, index)"
           @drop="handleDrop($event, index)"
-          :is-global-dragging="!!draggedTurnState"
-          :class="{ 'drop-target': dropTargetIndex === index }"
-          :style="{ opacity: dropTargetIndex === index ? 0.5 : 1 }"
+          :is-global-dragging="!!draggedTurnState || isSortingMode"
+          :class="{ 'drop-target': dropTargetIndex === index && !isDropRedundant(index) }"
         />
         
         <!-- End Drop Zone -->
@@ -697,7 +752,7 @@ onUnmounted(() => {
            class="drop-zone-end"
            @dragover="handleDragOver($event, conversation.length)"
            @drop="handleDrop($event, conversation.length)"
-           :class="{ active: dropTargetIndex === conversation.length }"
+           :class="{ active: dropTargetIndex === conversation.length && !isDropRedundant(conversation.length) }"
         ></div>
       </div>
       
@@ -709,6 +764,8 @@ onUnmounted(() => {
                 placeholder="追加提问 (可选)" 
                 class="input-question"
                 rows="2"
+                @keydown.meta.enter="addTurn"
+                @keydown.ctrl.enter="addTurn"
             ></textarea>
             <textarea 
                 v-model="currentAnswer" 
@@ -795,6 +852,20 @@ onUnmounted(() => {
     display: flex;
     gap: 15px;
     align-items: center;
+}
+
+.header-actions button {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  min-width: 100px; /* Wider for easier clicking */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .toggle-switch {
@@ -1127,6 +1198,12 @@ onUnmounted(() => {
 
 .status-message.error {
     color: #dc3545;
+}
+
+.active-btn {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
 }
 
 .chat-log {

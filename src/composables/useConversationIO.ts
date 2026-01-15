@@ -1,6 +1,10 @@
-import { type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import type { FullConversationTurn, FileSystemEntry, FileEntry } from './useFileSystem';
 import { getSubDirectoryHandle, calculateHash, moveFile } from '../utils/fileSystemUtils';
+
+// --- Reference Counting System (Module Scope Singleton) ---
+const referenceMap = ref(new Map<string, Set<string>>()); // markdownHash -> Set<jsonFileName>
+const isReferenceIndexBuilt = ref(false);
 
 export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | null>, emitter: any) {
 
@@ -32,32 +36,87 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
         }
     };
 
-    // Helper: Check if a markdown file is referenced by ANY other chat JSON file
-    const isMarkdownReferenced = async (answerId: string, excludeFileName: string): Promise<boolean> => {
-        if (!rootHandle.value) return false;
+    // --- Reference Counting System ---
+    // State moved to module scope managed above
+
+    const rebuildReferenceIndex = async () => {
+        if (!rootHandle.value) return;
+        referenceMap.value.clear();
+        
         try {
             const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats');
+            console.log('Building reference index from:', chatsDirHandle.name);
+            
             for await (const entry of chatsDirHandle.values()) {
                 if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-                    // Skip the file currently being modified/deleted
-                    if (entry.name === excludeFileName) continue;
-
-                    const file = await (entry as FileSystemFileHandle).getFile();
-                    const content = await file.text();
-                    
-                    // Optimization: Simple string check first (faster than parsing)
-                    // answer_id is stored in JSON as "answer_id": "..."
-                    // We can check if the string answerId appears.
-                    // To be safe, look for `"${answerId}"` to avoid partial matches (e.g. "1-abc" inside "11-abc")
-                    if (content.includes(`"${answerId}"`)) {
-                        return true;
+                    try {
+                        const file = await (entry as FileSystemFileHandle).getFile();
+                        const content = await file.text();
+                        const data = JSON.parse(content);
+                        if (Array.isArray(data)) {
+                            // Collect answer_ids from this file
+                            data.forEach((turn: any) => {
+                                if (turn.answer_id) {
+                                    if (!referenceMap.value.has(turn.answer_id)) {
+                                        referenceMap.value.set(turn.answer_id, new Set());
+                                    }
+                                    referenceMap.value.get(turn.answer_id)!.add(entry.name);
+                                }
+                            });
+                        }
+                    } catch (e) {
+                         console.warn(`Error indexing references for ${entry.name}:`, e);
                     }
                 }
             }
-        } catch (e) {
-            console.error("Error checking references:", e);
+            isReferenceIndexBuilt.value = true;
+            console.log('Reference index built. Total tracked MD files:', referenceMap.value.size);
+        } catch (error) {
+            console.error('Failed to rebuild reference index:', error);
         }
-        return false;
+    };
+
+    // Initialize index on mount or when root handle changes
+    // We can call this via an exposed init function or watch.
+    // Since useConversationIO is instantiated inside useFileSystem, which is global-ish scope.
+    
+    // Check if markdown is referenced (Memory check)
+    const isMarkdownReferencedInMemory = (answerId: string, excludeFileName: string): boolean => {
+       if (!isReferenceIndexBuilt.value) {
+           console.warn('Reference index not built yet, falling back to false (unsafe) or waiting? Falling back to safe-block.');
+           return true; // Safety: assume referenced if we don't know
+       }
+       
+       const refs = referenceMap.value.get(answerId);
+       if (!refs) return false;
+       
+       // Check if there are ANY files OTHER than excludeFileName
+       if (refs.size > 1) return true;
+       if (refs.size === 1 && !refs.has(excludeFileName)) return true;
+       
+       return false;
+    };
+
+    // Update index helper
+    const updateReferenceIndexForFile = (filename: string, newAnswerIds: string[], oldAnswerIds: string[]) => {
+        // Remove old refs
+        oldAnswerIds.forEach(id => {
+            const fileSet = referenceMap.value.get(id);
+            if (fileSet) {
+                fileSet.delete(filename);
+                if (fileSet.size === 0) {
+                    referenceMap.value.delete(id);
+                }
+            }
+        });
+        
+        // Add new refs
+        newAnswerIds.forEach(id => {
+            if (!referenceMap.value.has(id)) {
+                referenceMap.value.set(id, new Set());
+            }
+            referenceMap.value.get(id)!.add(filename);
+        });
     };
 
     const saveConversation = async (conversationTurns: { question: string | null; answer: string }[]): Promise<FileEntry | null> => {
@@ -98,6 +157,9 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             await writable.write(JSON.stringify(conversationJson, null, 2));
             await writable.close();
 
+            // Update Index
+            updateReferenceIndexForFile(jsonFileHandle.name, conversationJson.map(t => t.answer_id), []);
+
             emitter.$emit('file-system-changed');
             const finalFile = await jsonFileHandle.getFile();
             return { name: jsonFileHandle.name, kind: 'file', handle: jsonFileHandle, mtime: finalFile.lastModified };
@@ -117,10 +179,13 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
 
             const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown');
             if (markdownDirHandle && Array.isArray(chatData)) {
+                // Ensure index is ready (if not, maybe just skip deletion of MD or rebuild)
+                if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex();
+
                 for (const turn of chatData) {
                     try {
-                        // Check if referenced by others
-                        if (await isMarkdownReferenced(turn.answer_id, chatFileHandle.name)) {
+                        // Check if referenced by others (Memory)
+                        if (isMarkdownReferencedInMemory(turn.answer_id, chatFileHandle.name)) {
                             console.log(`Skipping deletion of referenced markdown: ${turn.answer_id}.md`);
                             continue;
                         }
@@ -130,6 +195,9 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
                          // Ignore if file doesn't exist
                     }
                 }
+                
+                // Update Index: Remove all refs for this file
+                updateReferenceIndexForFile(chatFileHandle.name, [], chatData.map((t: any) => t.answer_id));
             }
             await parentDirHandle.removeEntry(chatFileHandle.name);
             emitter.$emit('file-system-changed');
@@ -200,11 +268,21 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             }
 
             // 3. Delete old markdown files that are no longer referenced
+            if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex();
+            
             for (const oldId of oldAnswerIds) {
                 if (!newAnswerIds.has(oldId)) {
                     try {
-                        // Check if referenced by others
-                        if (await isMarkdownReferenced(oldId, chatFileHandle.name)) {
+                        // Check if referenced by others (Memory)
+                        // Note: At this point, updateReferenceIndexForFile hasn't run yet for THIS file changes.
+                        // So the referenceMap still thinks this file references oldId.
+                        // We need to account for that.
+                        // Actually, checkRefs logic: `refs.size === 1 && !refs.has(excludeFileName)`.
+                        // If we pass `chatFileHandle.name` as exclude, it ignores the *current* file's old reference.
+                        // Checks if *anyone else* references it.
+                        // This logic holds up.
+                        
+                        if (isMarkdownReferencedInMemory(oldId, chatFileHandle.name)) {
                              console.log(`Skipping deletion of referenced markdown: ${oldId}.md`);
                              continue;
                         }
@@ -221,6 +299,13 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
             const writable = await chatFileHandle.createWritable();
             await writable.write(JSON.stringify(newConversationJson, null, 2));
             await writable.close();
+
+            // Update Index
+            updateReferenceIndexForFile(
+                chatFileHandle.name, 
+                newConversationJson.map(t => t.answer_id), 
+                Array.from(oldAnswerIds)
+            );
 
             emitter.$emit('file-system-changed'); // Notify UI to refresh if needed
 
@@ -270,6 +355,7 @@ export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | nu
         saveConversation,
         deleteConversation,
         renameConversation,
+        rebuildReferenceIndex, // Expose for initialization
         updateConversation,
         mergeConversations
     };

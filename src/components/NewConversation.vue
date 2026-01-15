@@ -287,6 +287,8 @@ const renderedTurns = computed(() => {
                 placeholder="用户提问 (可选)" 
                 class="input-question"
                 rows="2"
+                @keydown.meta.enter="addTurn"
+                @keydown.ctrl.enter="addTurn"
             ></textarea>
             <textarea 
                 v-model="currentAnswer" 

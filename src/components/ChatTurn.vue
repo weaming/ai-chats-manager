@@ -3,6 +3,7 @@ import { ref, watch, nextTick } from 'vue';
 import type { PropType } from 'vue';
 import type { FullConversationTurn } from '../composables/useFileSystem';
 import { useDragDrop } from '../composables/useDragDrop';
+import { marked } from 'marked';
 
 interface SelectionState {
     question: boolean;
@@ -75,6 +76,28 @@ watch(() => props.isEditing, async (newVal) => {
 const { draggedTurnState } = useDragDrop();
 
 // --- Drag and Drop ---
+// Helper to get plain text snippet from HTML
+// Helper to get plain text snippet from HTML/Markdown
+const getSnippet = (content: string) => {
+    if (!content) return '';
+    
+    // Ensure content is rendered to HTML first (even if double-rendered, standard markdown parsers handle HTML blocks)
+    // This handles cases where parent might not have rendered it, or if we want to be sure.
+    // However, since ConversationViewer alreayd renders it, this might be redundant but safe.
+    // Wait, if ConversationViewer renders it, it's HTML. marked(HTML) -> HTML. 
+    // If it's pure text, marked(text) -> <p>text</p>.
+    // So safe.
+    
+    const html = marked.parse(content) as string;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const text = doc.body.textContent || '';
+    
+    return text.trim().split('\n')[0]?.substring(0, 100); // 100 chars max
+};
+
+
 const handleDragStart = (event: DragEvent) => {
     if (props.isEditing) {
         event.preventDefault();
@@ -160,7 +183,7 @@ const handleCancel = () => {
                     <div class="bubble-content question-content" :class="{ active: selection?.question }">
                          <!-- Export Mode: Number in Bubble -->
                         <span v-if="layoutMode === 'export' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
-                        <span class="question-text">{{ turn.question }}</span>
+                        <span class="question-text">{{ getSnippet(turn.question || '') }}</span>
                     </div>
                 </div>
                 
@@ -176,7 +199,7 @@ const handleCancel = () => {
                         
                     <!-- Dragging View: Snippet only if NO question (otherwise hidden entirely by v-if above) -->
                     <div v-else class="bubble-content snippet-content" :class="{ active: selection?.answer }">
-                        {{ (turn.answer || '').split('\n')[0]?.substring(0, 100) }}...
+                        {{ getSnippet(turn.answer) }}...
                     </div>
                 </div>
             </div>
@@ -217,7 +240,8 @@ const handleCancel = () => {
   transition: opacity 0.2s;
 }
 .chat-turn.dragging {
-    opacity: 0.4;
+    /* No opacity change requested */
+    background-color: #f8f9fa; /* Optional: slight background change instead? Or nothing. Keeping nothing as requested. */
 }
 
 .turn-controls {
@@ -284,9 +308,10 @@ const handleCancel = () => {
 }
 
 .bubble-content {
-  padding: 12px 18px;
+  padding: 16px 20px; /* Increased from 12px 18px */
   border-radius: 18px;
-  line-height: 1.6;
+  line-height: 26px; /* Increased from 1.6 (approx 24px) */
+  font-size: 16px; /* Explicitly set to match export */
   border: 2px solid var(--border-color);
   background-clip: padding-box;
   width: 100%;
@@ -414,32 +439,23 @@ const handleCancel = () => {
   font-weight: bold;
 }
 
-/* Export Mode Adjustments - Match Gemini Official Design */
+/* Export Mode Adjustments - Now Default */
+/* We keep mode-export class for any specific overrides if needed, but base styles are now synced */
 .chat-turn.mode-export .bubble-content {
-  font-size: 16px;
-  line-height: 26px;
-  padding: 16px 20px;
   color: #1f1f1f;
 }
 
 .chat-turn.mode-export .question-content {
-  font-size: 16px;
-  line-height: 26px;
+  /* No special override needed if base is same */
 }
-
-.chat-turn.mode-export .answer .bubble-content {
-  font-size: 16px;
-  line-height: 26px;
-}
-
-/* Markdown content in export mode - Gemini Official Styles */
-.chat-turn.mode-export :deep(.markdown-body) {
+/* Markdown content - Synced with Gemini Official Styles for ALL modes */
+:deep(.markdown-body) {
   font-size: 16px;
   line-height: 26px;
   color: #1f1f1f;
 }
 
-.chat-turn.mode-export :deep(.markdown-body h1) {
+:deep(.markdown-body h1) {
   font-size: 16px;
   line-height: 22px;
   margin-top: 1em;
@@ -447,7 +463,7 @@ const handleCancel = () => {
   font-weight: 700;
 }
 
-.chat-turn.mode-export :deep(.markdown-body h2) {
+:deep(.markdown-body h2) {
   font-size: 16px;
   line-height: 22px;
   margin-top: 1em;
@@ -455,7 +471,7 @@ const handleCancel = () => {
   font-weight: 700;
 }
 
-.chat-turn.mode-export :deep(.markdown-body h3) {
+:deep(.markdown-body h3) {
   font-size: 16px;
   line-height: 22px;
   margin-top: 0.8em;
@@ -463,7 +479,7 @@ const handleCancel = () => {
   font-weight: 700;
 }
 
-.chat-turn.mode-export :deep(.markdown-body h4) {
+:deep(.markdown-body h4) {
   font-size: 16px;
   line-height: 22px;
   margin-top: 0.8em;
@@ -471,34 +487,34 @@ const handleCancel = () => {
   font-weight: 700;
 }
 
-.chat-turn.mode-export :deep(.markdown-body p) {
+:deep(.markdown-body p) {
   font-size: 16px;
   line-height: 26px;
   margin-bottom: 1em;
   font-weight: 400;
 }
 
-.chat-turn.mode-export :deep(.markdown-body ul),
-.chat-turn.mode-export :deep(.markdown-body ol) {
+:deep(.markdown-body ul),
+:deep(.markdown-body ol) {
   font-size: 16px;
   line-height: 26px;
   margin-bottom: 1em;
   padding-left: 2em;
 }
 
-.chat-turn.mode-export :deep(.markdown-body li) {
+:deep(.markdown-body li) {
   font-size: 16px;
   line-height: 26px;
   margin-bottom: 0.3em;
   font-weight: 400;
 }
 
-.chat-turn.mode-export :deep(.markdown-body ol p),
-.chat-turn.mode-export :deep(.markdown-body li p) {
+:deep(.markdown-body ol p),
+:deep(.markdown-body li p) {
   margin: 0;
 }
 
-.chat-turn.mode-export :deep(.markdown-body code) {
+:deep(.markdown-body code) {
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 0.875em;
   background-color: #f5f5f5;
@@ -506,7 +522,7 @@ const handleCancel = () => {
   border-radius: 3px;
 }
 
-.chat-turn.mode-export :deep(.markdown-body pre) {
+:deep(.markdown-body pre) {
   background-color: #f6f8fa;
   padding: 16px;
   border-radius: 6px;
@@ -514,22 +530,58 @@ const handleCancel = () => {
   margin: 1em 0;
 }
 
-.chat-turn.mode-export :deep(.markdown-body pre code) {
+:deep(.markdown-body pre code) {
   background-color: transparent;
   padding: 0;
   font-size: 14px;
   line-height: 20px;
 }
 
-.chat-turn.mode-export :deep(.markdown-body strong),
-.chat-turn.mode-export :deep(.markdown-body b) {
+:deep(.markdown-body strong),
+:deep(.markdown-body b) {
   font-weight: 700;
+}
+
+:deep(.markdown-body em) {
+  font-style: italic;
+}
+
+:deep(.markdown-body blockquote) {
+  border-left: 3px solid #d0d7de;
+  padding-left: 1em;
+  margin-left: 0;
+  border-left: 3px solid #d0d7de;
+  padding-left: 1em;
+  margin-left: 0;
+  color: #57606a;
+}
+
+:deep(.markdown-body hr) {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #e1e4e8; /* Lighter color */
+  border: 0;
+  height: 1px; /* Thinner */
+}
+
+/* Table styles for export mode - Match Gemini */
+.chat-turn.mode-export :deep(.markdown-body table) {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.chat-turn.mode-export :deep(.markdown-body th),
+.chat-turn.mode-export :deep(.markdown-body td) {
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 12px;
 }
 
 /* Compact Mode for Dragging */
 .chat-turn.compact-mode {
     gap: 5px; /* Reduced from 15px */
-    margin-bottom: 4px; /* Tighter list */
+    margin-bottom: 0; /* Let parent gap handle spacing */
 }
 
 .chat-turn.compact-mode .chat-bubble.question {
@@ -546,29 +598,7 @@ const handleCancel = () => {
     padding-top: 10px; 
 }
 
-.chat-turn.mode-export :deep(.markdown-body em) {
-  font-style: italic;
-}
 
-.chat-turn.mode-export :deep(.markdown-body blockquote) {
-  border-left: 3px solid #d0d7de;
-  padding-left: 1em;
-  margin-left: 0;
-  color: #57606a;
-}
-
-/* Table styles for export mode - Match Gemini */
-.chat-turn.mode-export :deep(.markdown-body table) {
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.chat-turn.mode-export :deep(.markdown-body th),
-.chat-turn.mode-export :deep(.markdown-body td) {
-  font-size: 14px;
-  line-height: 20px;
-  padding: 8px 12px;
-}
 
 .snippet-content {
     color: #6c757d;
