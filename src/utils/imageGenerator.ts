@@ -30,7 +30,7 @@ export const prepareShareData = (
         .filter((item): item is { selection: Selection, originalTurn: RenderedTurn } => !!item);
     
     // Create view-models where unselected parts are hidden
-    const turnsToRender = selectedItems.map((item, _, arr) => {
+    const turnsToRender = selectedItems.map((item, index, arr) => {
         const { selection, originalTurn } = item;
         const turnCopy = { ...originalTurn };
 
@@ -42,11 +42,9 @@ export const prepareShareData = (
             turnCopy.answer = '';
         }
 
-        // Handle question number display rule:
-        // Only show if original number > 0 AND we are exporting more than 1 item
-        if (arr.length <= 1) {
-            turnCopy.questionNumber = 0;
-        }
+        // Renumber for export: 
+        // If only 1 item, hide the number (0). Otherwise start from 1.
+        turnCopy.questionNumber = arr.length === 1 ? 0 : index + 1;
 
         return {
             selection,

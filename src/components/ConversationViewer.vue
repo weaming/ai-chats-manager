@@ -717,7 +717,7 @@ onUnmounted(() => {
         <div class="theme-controls">
           <label class="toggle-all-themes">
             <input type="checkbox" v-model="showAllThemes" />
-            <span class="label-text">全部</span>
+            <span class="label-text">全部主题</span>
           </label>
           <select 
             :value="currentTheme" 
