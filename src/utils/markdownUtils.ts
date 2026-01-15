@@ -1,3 +1,18 @@
+import { marked } from 'marked';
+import hljs from 'highlight.js';
+
+export function setupMarkdownRenderer() {
+    marked.use({
+        renderer: {
+            code({ text, lang }: any) {
+                const validLang = !!(lang && hljs.getLanguage(lang));
+                const highlighted = validLang ? hljs.highlight(text, { language: lang }).value : hljs.highlightAuto(text).value;
+                return `<pre class="hljs"><code class="hljs language-${lang || 'text'}">${highlighted}</code></pre>`;
+            }
+        }
+    });
+}
+
 /**
  * Markdown 格式修复工具
  * 

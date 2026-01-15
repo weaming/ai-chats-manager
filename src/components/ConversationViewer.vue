@@ -9,6 +9,7 @@ import { useShareStore } from '../stores/shareStore';
 import { fixMarkdownSpacing } from '../utils/markdownUtils'; // Import fix utility
 import { diffChars, type DiffPart } from '../utils/simpleDiff';
 import ChatTurn from './ChatTurn.vue';
+import { useTheme } from '../composables/useTheme';
 
 interface Selection {
   index: number;
@@ -24,6 +25,7 @@ const props = defineProps({
 });
 
 const { readConversation, updateConversation } = useFileSystem();
+const { availableThemes, currentTheme, applyTheme, showAllThemes } = useTheme();
 const conversation = ref<(FullConversationTurn & { id?: symbol })[]>([]);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
@@ -710,7 +712,30 @@ onUnmounted(() => {
   <div class="conversation-viewer">
     <div class="viewer-header">
       <h2>{{ formattedFileName }}</h2>
-      <div style="display: flex; gap: 10px;">
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <!-- Theme Selector -->
+        <div class="theme-controls">
+          <label class="toggle-all-themes">
+            <input type="checkbox" v-model="showAllThemes" />
+            <span class="label-text">全部</span>
+          </label>
+          <select 
+            :value="currentTheme" 
+            @change="(e) => applyTheme((e.target as HTMLSelectElement).value)"
+            class="theme-select"
+            title="选择代码高亮主题"
+          >
+            <option 
+              v-for="theme in availableThemes" 
+              :key="theme.value" 
+              :value="theme.value"
+              :disabled="(theme as any).disabled"
+            >
+              {{ theme.name }}
+            </option>
+          </select>
+        </div>
+
         <button @click="toggleSortingMode" :class="{ 'active-btn': isSortingMode }">{{ isSortingMode ? '退出排序' : '排序' }}</button>
         <button @click="handleSelectAll" :disabled="isAllSelected">全选</button>
         <button @click="handleClearSelection" :disabled="selectionState.length === 0">清空</button>
@@ -1145,6 +1170,43 @@ onUnmounted(() => {
     padding: 20px;
     border-radius: 8px;
 }
+/* Theme Controls */
+.theme-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+    border-right: 1px solid #e9ecef;
+    padding-right: 12px;
+}
+
+.theme-select {
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid #ced4da;
+    background-color: white;
+    font-size: 13px;
+    color: #495057;
+    cursor: pointer;
+    outline: none;
+    max-width: 140px;
+}
+.theme-select:focus {
+    border-color: var(--primary-color);
+}
+
+.toggle-all-themes {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.toggle-all-themes .label-text {
+    font-size: 13px;
+    margin-left: 4px;
+    color: #6c757d;
+}
 
 .input-group {
     display: flex;
@@ -1238,64 +1300,4 @@ onUnmounted(() => {
 }
 
 
-</style>
-
-<!-- Global styles for rendered markdown -->
-<style>
-/* ... existing global markdown styles ... */
-.markdown-body {
-  font-size: 15px;
-}
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  margin-top: 20px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 5px;
-}
-.markdown-body p {
-  margin-top: 0;
-  margin-bottom: 16px;
-}
-.markdown-body ul, .markdown-body ol {
-  padding-left: 2em;
-  margin-bottom: 16px;
-}
-.markdown-body pre {
-  background-color: #2b2b2b;
-  color: #f8f8f2;
-  padding: 16px;
-  border-radius: 6px;
-  overflow-x: auto;
-}
-.markdown-body code {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-  font-size: 85%;
-  background-color: rgba(27,31,35,0.05);
-  border-radius: 3px;
-  padding: .2em .4em;
-}
-.markdown-body pre code {
-  background: none;
-  padding: 0;
-}
-
-.markdown-body table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 16px;
-  display: block; /* Ensure table can scroll horizontally if needed */
-  overflow-x: auto; /* Ensure table can scroll horizontally if needed */
-}
-
-.markdown-body th,
-.markdown-body td {
-  border: 1px solid #ddd;
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.markdown-body th {
-  background-color: #f8f8f8;
-  font-weight: bold;
-}
 </style>

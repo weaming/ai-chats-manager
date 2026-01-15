@@ -315,6 +315,7 @@ const handleCancel = () => {
   border: 2px solid var(--border-color);
   background-clip: padding-box;
   width: 100%;
+  overflow: hidden; /* Clip full-bleed children like code blocks */
 }
 
 .bubble-content.active {
@@ -443,11 +444,10 @@ const handleCancel = () => {
 /* We keep mode-export class for any specific overrides if needed, but base styles are now synced */
 .chat-turn.mode-export .bubble-content {
   color: #1f1f1f;
+  border-width: 1px;
 }
 
-.chat-turn.mode-export .question-content {
-  /* No special override needed if base is same */
-}
+
 /* Markdown content - Synced with Gemini Official Styles for ALL modes */
 :deep(.markdown-body) {
   font-size: 16px;
@@ -514,25 +514,37 @@ const handleCancel = () => {
   margin: 0;
 }
 
-:deep(.markdown-body code) {
+:deep(.markdown-body code:not(.hljs)) {
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 0.875em;
-  background-color: #f5f5f5;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 :deep(.markdown-body pre) {
-  background-color: #f6f8fa;
-  padding: 16px;
-  border-radius: 6px;
+  padding: 0;
+  border-radius: 0; /* No radius for full-width look */
   overflow-x: auto;
-  margin: 1em 0;
+  margin: 1em -20px; /* Negative margin to span full bubble width (parent padding is 20px) */
+  border: none;
+}
+
+/* Compact mode layout adjustment */
+.chat-turn.compact-mode :deep(.markdown-body pre) {
+  margin-left: -12px; /* Standardize with 12px padding */
+  margin-right: -12px;
 }
 
 :deep(.markdown-body pre code) {
-  background-color: transparent;
-  padding: 0;
+  /* Reset inline code styles for block code */
+  padding: 16px; /* Restore padding overridden by high specificity */
+  border: none;
+  
+  /* Ensure block display for proper padding/background */
+  display: block; 
+  
+  /* Let highlight.js theme handle fonts */
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 14px;
   line-height: 20px;
 }
@@ -576,6 +588,14 @@ const handleCancel = () => {
   font-size: 14px;
   line-height: 20px;
   padding: 8px 12px;
+}
+
+/* Fix for long code lines in export mode: force wrap */
+.chat-turn.mode-export :deep(.markdown-body pre),
+.chat-turn.mode-export :deep(.markdown-body pre code) {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-x: hidden; /* Hide scrollbar in image */
 }
 
 /* Compact Mode for Dragging */
