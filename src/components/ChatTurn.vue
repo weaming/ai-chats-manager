@@ -1,241 +1,261 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import type { PropType } from 'vue';
-import type { FullConversationTurn } from '../composables/useFileSystem';
-import { useDragDrop } from '../composables/useDragDrop';
-import { marked } from 'marked';
+import { ref, watch, nextTick } from 'vue'
+import type { PropType } from 'vue'
+import type { FullConversationTurn } from '../composables/useFileSystem'
+import { useDragDrop } from '../composables/useDragDrop'
+import { marked } from 'marked'
 
 interface SelectionState {
-    question: boolean;
-    answer: boolean;
+  question: boolean
+  answer: boolean
 }
 
 // RenderedTurn interface (implicit in parent, explicit here for safety)
 interface RenderedTurn extends FullConversationTurn {
-    index: number;
-    questionNumber: number;
+  index: number
+  questionNumber: number
 }
 
 const props = defineProps({
-    turn: {
-        type: Object as PropType<RenderedTurn>,
-        required: true,
-    },
-    rawTurn: {
-        type: Object as PropType<FullConversationTurn>,
-        required: true,
-    },
-    isEditing: {
-        type: Boolean,
-        default: false,
-    },
-    selection: {
-        type: Object as PropType<SelectionState | undefined>,
-        default: undefined,
-    },
-    layoutMode: {
-        type: String as PropType<'default' | 'export'>,
-        default: 'default'
-    },
-    isGlobalDragging: {
-        type: Boolean,
-        default: false
-    },
-    index: {
-        type: Number,
-        required: true
-    }
-});
+  turn: {
+    type: Object as PropType<RenderedTurn>,
+    required: true,
+  },
+  rawTurn: {
+    type: Object as PropType<FullConversationTurn>,
+    required: true,
+  },
+  isEditing: {
+    type: Boolean,
+    default: false,
+  },
+  selection: {
+    type: Object as PropType<SelectionState | undefined>,
+    default: undefined,
+  },
+  layoutMode: {
+    type: String as PropType<'default' | 'export'>,
+    default: 'default',
+  },
+  isGlobalDragging: {
+    type: Boolean,
+    default: false,
+  },
+  index: {
+    type: Number,
+    required: true,
+  },
+})
 
 const emit = defineEmits<{
-    (e: 'toggle-selection'): void;
-    (e: 'toggle-question-selection'): void;
-    (e: 'edit-start'): void;
-    (e: 'edit-cancel'): void;
-    (e: 'edit-save', payload: { question: string | null; answer: string }): void;
-    (e: 'delete'): void;
-    (e: 'move-up'): void;
-    (e: 'move-down'): void;
-}>();
+  (e: 'toggle-selection'): void
+  (e: 'toggle-question-selection'): void
+  (e: 'edit-start'): void
+  (e: 'edit-cancel'): void
+  (e: 'edit-save', payload: { question: string | null; answer: string }): void
+  (e: 'delete'): void
+  (e: 'move-up'): void
+  (e: 'move-down'): void
+}>()
 
-const draftQuestion = ref<string>('');
-const draftAnswer = ref('');
-const minHeight = ref(0);
-const rootEl = ref<HTMLElement | null>(null);
+const draftQuestion = ref<string>('')
+const draftAnswer = ref('')
+const minHeight = ref(0)
+const rootEl = ref<HTMLElement | null>(null)
 
 // Initialize drafts when entering edit mode
-watch(() => props.isEditing, async (newVal) => {
+watch(
+  () => props.isEditing,
+  async (newVal) => {
     if (newVal) {
-        // Measure height before switching view
-        if (rootEl.value) {
-            minHeight.value = rootEl.value.offsetHeight;
-        }
-        draftQuestion.value = props.rawTurn.question || '';
-        draftAnswer.value = props.rawTurn.answer;
+      // Measure height before switching view
+      if (rootEl.value) {
+        minHeight.value = rootEl.value.offsetHeight
+      }
+      draftQuestion.value = props.rawTurn.question || ''
+      draftAnswer.value = props.rawTurn.answer
     } else {
-        minHeight.value = 0;
+      minHeight.value = 0
     }
-});
+  },
+)
 
-const { draggedTurnState } = useDragDrop();
+const { draggedTurnState } = useDragDrop()
 
 // --- Drag and Drop ---
 // Helper to get plain text snippet from HTML
 // Helper to get plain text snippet from HTML/Markdown
 const getSnippet = (content: string) => {
-    if (!content) return '';
-    
-    // Ensure content is rendered to HTML first (even if double-rendered, standard markdown parsers handle HTML blocks)
-    // This handles cases where parent might not have rendered it, or if we want to be sure.
-    // However, since ConversationViewer alreayd renders it, this might be redundant but safe.
-    // Wait, if ConversationViewer renders it, it's HTML. marked(HTML) -> HTML. 
-    // If it's pure text, marked(text) -> <p>text</p>.
-    // So safe.
-    
-    const html = marked.parse(content) as string;
+  if (!content) return ''
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const text = doc.body.textContent || '';
-    
-    return text.trim().split('\n')[0]?.substring(0, 100); // 100 chars max
-};
+  // Ensure content is rendered to HTML first (even if double-rendered, standard markdown parsers handle HTML blocks)
+  // This handles cases where parent might not have rendered it, or if we want to be sure.
+  // However, since ConversationViewer alreayd renders it, this might be redundant but safe.
+  // Wait, if ConversationViewer renders it, it's HTML. marked(HTML) -> HTML.
+  // If it's pure text, marked(text) -> <p>text</p>.
+  // So safe.
 
+  const html = marked.parse(content) as string
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  const text = doc.body.textContent || ''
+
+  return text.trim().split('\n')[0]?.substring(0, 100) // 100 chars max
+}
 
 const handleDragStart = (event: DragEvent) => {
-    if (props.isEditing) {
-        event.preventDefault();
-        return;
-    }
-    
-    // Parent handles setting global state (draggedTurnState) and dataTransfer data
-    // based on selection. We just handle the visual drag image here.
+  if (props.isEditing) {
+    event.preventDefault()
+    return
+  }
 
-    if (event.dataTransfer) {
-        // Fallback effect
-        event.dataTransfer.effectAllowed = 'move';
-        
-        // Custom Drag Image (Question Bubble Only)
-        const questionBubble = rootEl.value?.querySelector('.chat-bubble.question') as HTMLElement;
-        const answerBubble = rootEl.value?.querySelector('.chat-bubble.answer') as HTMLElement;
-        const dragTarget = questionBubble || answerBubble;
+  // Parent handles setting global state (draggedTurnState) and dataTransfer data
+  // based on selection. We just handle the visual drag image here.
 
-        if (dragTarget) {
-            event.dataTransfer.setDragImage(dragTarget, 0, 0);
-        }
+  if (event.dataTransfer) {
+    // Fallback effect
+    event.dataTransfer.effectAllowed = 'move'
+
+    // Custom Drag Image (Question Bubble Only)
+    const questionBubble = rootEl.value?.querySelector('.chat-bubble.question') as HTMLElement
+    const answerBubble = rootEl.value?.querySelector('.chat-bubble.answer') as HTMLElement
+    const dragTarget = questionBubble || answerBubble
+
+    if (dragTarget) {
+      event.dataTransfer.setDragImage(dragTarget, 0, 0)
     }
-    
-    // Visual feedback
-    if (rootEl.value) {
-        rootEl.value.classList.add('dragging');
-    }
-};
+  }
+
+  // Visual feedback
+  if (rootEl.value) {
+    rootEl.value.classList.add('dragging')
+  }
+}
 
 const handleDragEnd = () => {
-    if (rootEl.value) {
-        rootEl.value.classList.remove('dragging');
-    }
-    // Always clear global state on drag end to prevent stuck state
-    // We can also delay this slightly if needed, but usually instant clear is fine.
-    // However, if we delayed start, let's keep end instant to restore view ASAP.
-    draggedTurnState.value = null;
-};
-
+  if (rootEl.value) {
+    rootEl.value.classList.remove('dragging')
+  }
+  // Always clear global state on drag end to prevent stuck state
+  // We can also delay this slightly if needed, but usually instant clear is fine.
+  // However, if we delayed start, let's keep end instant to restore view ASAP.
+  draggedTurnState.value = null
+}
 
 const handleSave = () => {
-    emit('edit-save', {
-        question: draftQuestion.value,
-        answer: draftAnswer.value,
-    });
-};
+  emit('edit-save', {
+    question: draftQuestion.value,
+    answer: draftAnswer.value,
+  })
+}
 
 const handleCancel = () => {
-    emit('edit-cancel');
-};
+  emit('edit-cancel')
+}
 </script>
 
 <template>
-    <div 
-        class="chat-turn" 
-        :class="[`mode-${layoutMode}`, { 'compact-mode': isGlobalDragging }]"
-        :id="'turn-' + index"
-        ref="rootEl"
-        :draggable="!isEditing"
-        @dragstart="handleDragStart"
-        @dragend="handleDragEnd"
-    >
-        <!-- Left Column: Controls -->
-        <!-- Only show controls if in default mode or editing/drag active context -->
-        <div class="turn-controls" v-if="layoutMode === 'default' || isEditing">
-            <template v-if="!isEditing">
-                <span v-if="layoutMode === 'default' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
-                <!-- Hide actions during global drag -->
-                <template v-if="!isGlobalDragging">
-                    <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
-                    <button class="move-btn move-up-btn" @click.stop="$emit('move-up')" title="上移">⬆️</button>
-                    <button class="move-btn move-down-btn" @click.stop="$emit('move-down')" title="下移">⬇️</button>
-                </template>
-            </template>
-        </div>
-        <!-- In export mode with internal numbering, we can hide the sidebar column to save space -->
-        
-        <!-- Right Column: Content -->
-        <div class="turn-content">
-            <!-- Viewing Mode -->
-            <div v-if="!isEditing" @click="$emit('toggle-selection')">
-                <div v-if="turn.question && turn.question.trim().length > 0" class="chat-bubble question"
-                    @click.stop="$emit('toggle-question-selection')">
-                    <div class="bubble-content question-content" :class="{ active: selection?.question }">
-                         <!-- Export Mode: Number in Bubble -->
-                        <span v-if="layoutMode === 'export' && turn.questionNumber > 0" class="question-number">{{ turn.questionNumber }}</span>
-                        <span class="question-text">{{ getSnippet(turn.question || '') }}</span>
-                    </div>
-                </div>
-                
-                <!-- Normal Answer View: Show if NOT dragging OR if dragging but no question (we'll show snippet instead handled below) -->
-                <!-- Actually user said: "If no question, show first line of text". "If question exists, hide answer". -->
-                
-                <div v-if="turn.answer && (!isGlobalDragging || (!turn.question && isGlobalDragging))" class="chat-bubble answer" 
-                    :class="{ 'compact-view': isGlobalDragging }">
-                    
-                    <!-- Standard Markdown View -->
-                    <div v-if="!isGlobalDragging" class="bubble-content markdown-body" :class="{ active: selection?.answer }"
-                        v-html="turn.answer"></div>
-                        
-                    <!-- Dragging View: Snippet only if NO question (otherwise hidden entirely by v-if above) -->
-                    <div v-else class="bubble-content snippet-content" :class="{ active: selection?.answer }">
-                        {{ getSnippet(turn.answer) }}...
-                    </div>
-                </div>
-            </div>
-
-            <!-- Editing Mode -->
-            <div v-else class="editing-view" :style="{ minHeight: minHeight + 'px' }">
-                <div class="editing-group">
-                    <label>问题</label>
-                    <textarea 
-                        v-model="draftQuestion" 
-                        rows="3"
-                        @keydown.meta.enter="handleSave"
-                        @keydown.ctrl.enter="handleSave"
-                    ></textarea>
-                </div>
-                <div class="editing-group answer-group">
-                    <label>回答</label>
-                    <textarea 
-                        v-model="draftAnswer" 
-                        class="answer-textarea"
-                        @keydown.meta.enter="handleSave"
-                        @keydown.ctrl.enter="handleSave"
-                    ></textarea>
-                </div>
-                <div class="editing-actions">
-                    <button class="primary-btn" @click="handleSave">保存</button>
-                    <button class="secondary-btn" @click="handleCancel">取消</button>
-                </div>
-            </div>
-        </div>
+  <div
+    class="chat-turn"
+    :class="[`mode-${layoutMode}`, { 'compact-mode': isGlobalDragging }]"
+    :id="'turn-' + index"
+    ref="rootEl"
+    :draggable="!isEditing"
+    @dragstart="handleDragStart"
+    @dragend="handleDragEnd"
+  >
+    <!-- Left Column: Controls -->
+    <!-- Only show controls if in default mode or editing/drag active context -->
+    <div class="turn-controls" v-if="layoutMode === 'default' || isEditing">
+      <template v-if="!isEditing">
+        <span v-if="layoutMode === 'default' && turn.questionNumber > 0" class="question-number">{{
+          turn.questionNumber
+        }}</span>
+        <!-- Hide actions during global drag -->
+        <template v-if="!isGlobalDragging">
+          <button class="edit-btn" @click.stop="$emit('edit-start')">✏️</button>
+          <button class="move-btn move-up-btn" @click.stop="$emit('move-up')" title="上移">
+            ⬆️
+          </button>
+          <button class="move-btn move-down-btn" @click.stop="$emit('move-down')" title="下移">
+            ⬇️
+          </button>
+        </template>
+      </template>
     </div>
+    <!-- In export mode with internal numbering, we can hide the sidebar column to save space -->
+
+    <!-- Right Column: Content -->
+    <div class="turn-content">
+      <!-- Viewing Mode -->
+      <div v-if="!isEditing" @click="$emit('toggle-selection')">
+        <div
+          v-if="turn.question && turn.question.trim().length > 0"
+          class="chat-bubble question"
+          @click.stop="$emit('toggle-question-selection')"
+        >
+          <div class="bubble-content question-content" :class="{ active: selection?.question }">
+            <!-- Export Mode: Number in Bubble -->
+            <span
+              v-if="layoutMode === 'export' && turn.questionNumber > 0"
+              class="question-number"
+              >{{ turn.questionNumber }}</span
+            >
+            <span class="question-text">{{ getSnippet(turn.question || '') }}</span>
+          </div>
+        </div>
+
+        <!-- Normal Answer View: Show if NOT dragging OR if dragging but no question (we'll show snippet instead handled below) -->
+        <!-- Actually user said: "If no question, show first line of text". "If question exists, hide answer". -->
+
+        <div
+          v-if="turn.answer && (!isGlobalDragging || (!turn.question && isGlobalDragging))"
+          class="chat-bubble answer"
+          :class="{ 'compact-view': isGlobalDragging }"
+        >
+          <!-- Standard Markdown View -->
+          <div
+            v-if="!isGlobalDragging"
+            class="bubble-content markdown-body"
+            :class="{ active: selection?.answer }"
+            v-html="turn.answer"
+          ></div>
+
+          <!-- Dragging View: Snippet only if NO question (otherwise hidden entirely by v-if above) -->
+          <div v-else class="bubble-content snippet-content" :class="{ active: selection?.answer }">
+            {{ getSnippet(turn.answer) }}...
+          </div>
+        </div>
+      </div>
+
+      <!-- Editing Mode -->
+      <div v-else class="editing-view" :style="{ minHeight: minHeight + 'px' }">
+        <div class="editing-group">
+          <label>问题</label>
+          <textarea
+            v-model="draftQuestion"
+            rows="3"
+            @keydown.meta.enter="handleSave"
+            @keydown.ctrl.enter="handleSave"
+          ></textarea>
+        </div>
+        <div class="editing-group answer-group">
+          <label>回答</label>
+          <textarea
+            v-model="draftAnswer"
+            class="answer-textarea"
+            @keydown.meta.enter="handleSave"
+            @keydown.ctrl.enter="handleSave"
+          ></textarea>
+        </div>
+        <div class="editing-actions">
+          <button class="primary-btn" @click="handleSave">保存</button>
+          <button class="secondary-btn" @click="handleCancel">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -245,8 +265,8 @@ const handleCancel = () => {
   transition: opacity 0.2s;
 }
 .chat-turn.dragging {
-    /* No opacity change requested */
-    background-color: #f8f9fa; /* Optional: slight background change instead? Or nothing. Keeping nothing as requested. */
+  /* No opacity change requested */
+  background-color: #f8f9fa; /* Optional: slight background change instead? Or nothing. Keeping nothing as requested. */
 }
 
 .turn-controls {
@@ -304,8 +324,6 @@ const handleCancel = () => {
   transform: scale(1.2);
 }
 
-
-
 .chat-bubble {
   display: flex;
   width: 100%; /* Bubbles now take full width of the right column */
@@ -324,18 +342,18 @@ const handleCancel = () => {
 }
 
 .bubble-content.active {
-    border-color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .question-content {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .question-text {
-    flex-grow: 1;
-    word-break: break-word;
+  flex-grow: 1;
+  word-break: break-word;
 }
 
 .question-number {
@@ -369,61 +387,61 @@ const handleCancel = () => {
 
 /* Editing View Styles */
 .editing-view {
-    padding: 15px;
-    border: 1px dashed var(--primary-color);
-    border-radius: 8px;
-    background-color: #f8f9fa;
-    display: flex;
-    flex-direction: column;
+  padding: 15px;
+  border: 1px dashed var(--primary-color);
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  display: flex;
+  flex-direction: column;
 }
 .editing-group {
-    margin-bottom: 15px;
+  margin-bottom: 15px;
 }
 .editing-group.answer-group {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
 }
 .editing-group label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: 500;
-    color: #495057;
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+  color: #495057;
 }
 .editing-group textarea {
-    width: 100%;
-    padding: 10px;
-    border-radius: 4px;
-    border: 1px solid #ced4da;
-    font-family: inherit;
-    font-size: 1rem;
-    line-height: 1.6;
-    resize: vertical;
-    box-sizing: border-box;
-    overflow-x: hidden;
+  width: 100%;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ced4da;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  resize: vertical;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 .editing-group textarea.answer-textarea {
-    flex-grow: 1;
+  flex-grow: 1;
 }
 .editing-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: 15px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 15px;
 }
 .editing-actions button {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 .editing-actions .primary-btn {
-    background-color: var(--primary-color);
-    color: white;
+  background-color: var(--primary-color);
+  color: white;
 }
 .editing-actions .secondary-btn {
-    background-color: #6c757d;
-    color: white;
+  background-color: #6c757d;
+  color: white;
 }
 
 /* Table styles for markdown-body */
@@ -454,12 +472,18 @@ const handleCancel = () => {
   border-width: 1px;
 }
 
-
 /* Markdown content - Synced with Gemini Official Styles for ALL modes */
 :deep(.markdown-body) {
   font-size: 16px;
   line-height: 26px;
   color: #1f1f1f;
+}
+
+:deep(.markdown-body img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 8px 0;
 }
 
 :deep(.markdown-body h1) {
@@ -546,10 +570,10 @@ const handleCancel = () => {
   /* Reset inline code styles for block code */
   padding: 16px; /* Restore padding overridden by high specificity */
   border: none;
-  
+
   /* Ensure block display for proper padding/background */
-  display: block; 
-  
+  display: block;
+
   /* Let highlight.js theme handle fonts */
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 14px;
@@ -607,33 +631,31 @@ const handleCancel = () => {
 
 /* Compact Mode for Dragging */
 .chat-turn.compact-mode {
-    gap: 5px; /* Reduced from 15px */
-    margin-bottom: 0; /* Let parent gap handle spacing */
+  gap: 5px; /* Reduced from 15px */
+  margin-bottom: 0; /* Let parent gap handle spacing */
 }
 
 .chat-turn.compact-mode .chat-bubble.question {
-    margin-bottom: 4px; /* Reduced from 15px */
+  margin-bottom: 4px; /* Reduced from 15px */
 }
 
 .chat-turn.compact-mode .bubble-content {
-    padding: 8px 12px; /* Slightly reduced padding */
-    min-height: auto;
+  padding: 8px 12px; /* Slightly reduced padding */
+  min-height: auto;
 }
 
 /* Ensure number stays aligned */
 .chat-turn.compact-mode .turn-controls {
-    padding-top: 10px; 
+  padding-top: 10px;
 }
 
-
-
 .snippet-content {
-    color: #6c757d;
-    font-style: italic;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 8px 18px; /* Reduced padding */
-    background-color: #f8f9fa;
+  color: #6c757d;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 8px 18px; /* Reduced padding */
+  background-color: #f8f9fa;
 }
 </style>

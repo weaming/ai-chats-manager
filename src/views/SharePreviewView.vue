@@ -1,39 +1,39 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useShareStore } from '../stores/shareStore';
-import SharePreview from '../components/SharePreview.vue';
-import ThemeSelector from '../components/ThemeSelector.vue';
-import { downloadElementAsPng } from '../utils/imageGenerator';
-const shareStore = useShareStore();
-const dlLoading = ref(false);
+import { onMounted, ref } from 'vue'
+import { useShareStore } from '../stores/shareStore'
+import SharePreview from '../components/SharePreview.vue'
+import ThemeSelector from '../components/ThemeSelector.vue'
+import { downloadElementAsPng } from '../utils/imageGenerator'
+const shareStore = useShareStore()
+const dlLoading = ref(false)
 
 onMounted(() => {
-    shareStore.loadFromStorage();
-});
+  shareStore.loadFromStorage()
+})
 
 const handleDownload = async () => {
-    const element = document.querySelector('.share-preview-container') as HTMLElement;
-    if (!element) return;
+  const element = document.querySelector('.share-preview-container') as HTMLElement
+  if (!element) return
 
-    dlLoading.value = true;
-    try {
-        // Wait for potential rendering/fonts
-        await document.fonts.ready;
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await downloadElementAsPng(element);
-        // Automatically close after successful download
-        handleClose();
-    } catch (e) {
-        console.error('Download failed', e);
-        alert('生成图片失败');
-    } finally {
-        dlLoading.value = false;
-    }
-};
+  dlLoading.value = true
+  try {
+    // Wait for potential rendering/fonts
+    await document.fonts.ready
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await downloadElementAsPng(element)
+    // Automatically close after successful download
+    handleClose()
+  } catch (e) {
+    console.error('Download failed', e)
+    alert('生成图片失败')
+  } finally {
+    dlLoading.value = false
+  }
+}
 
 const handleClose = () => {
-    window.close();
-};
+  window.close()
+}
 </script>
 
 <template>
@@ -50,7 +50,7 @@ const handleClose = () => {
         </div>
       </div>
     </div>
-    
+
     <div class="preview-body">
       <div v-if="shareStore.previewTurns.length > 0" class="preview-container">
         <SharePreview :turns="shareStore.previewTurns" />
@@ -77,7 +77,7 @@ const handleClose = () => {
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .toolbar-content {
@@ -108,7 +108,7 @@ const handleClose = () => {
 }
 
 .preview-container {
-  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
   background: white;
   /* Ensure fixed width to match generated PNG expectations */
   width: 800px;
@@ -120,6 +120,19 @@ const handleClose = () => {
   justify-content: center;
   height: 100%;
   color: #adb5bd;
+}
+
+.primary-btn {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition:
+    filter 0.2s,
+    background-color 0.2s;
 }
 
 .primary-btn:hover {
@@ -136,7 +149,12 @@ const handleClose = () => {
   border: 1px solid #ced4da;
   padding: 8px 16px;
   cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: background-color 0.2s;
 }
 
-
+.secondary-btn:hover {
+  background-color: #f8f9fa;
+}
 </style>
