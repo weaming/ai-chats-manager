@@ -8,16 +8,17 @@
   },
   "scripts": {
     "dev": "vite",
+    "test": "bun test",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix --cache",
     "format": "prettier --write --experimental-cli src/",
-    "deploy": "wrangler pages deploy dist --project-name ai-chats"
+    "deploy": "wrangler pages deploy dist --project-name ai-chats",
+    "build-and-deploy": "bun run build && bun run deploy"
   },
   "dependencies": {
-    "@types/marked": "^5.0.2",
     "highlight.js": "^11.11.1",
     "html-to-image": "^1.11.13",
     "idb": "^8.0.3",

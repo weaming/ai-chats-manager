@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import ChatTurn from './ChatTurn.vue';
-import type { FullConversationTurn } from '../composables/useFileSystem';
+import ChatTurn from './ChatTurn.vue'
+import type { FullConversationTurn } from '../composables/useFileSystem'
 
-export interface RenderedTurn extends FullConversationTurn {
-    index: number;
-    questionNumber: number;
+interface RenderedTurn extends FullConversationTurn {
+  index: number
+  questionNumber: number
 }
 
-// Just for type safety in props, though we don't use selection inside directly 
+// Just for type safety in props, though we don't use selection inside directly
 // because we expect pre-filtered turns.
 interface Selection {
-    index: number;
-    question: boolean;
-    answer: boolean;
+  index: number
+  question: boolean
+  answer: boolean
 }
 
 defineProps<{
-  turns: { selection: Selection, turn: RenderedTurn }[]
-}>();
+  turns: { selection: Selection; turn: RenderedTurn }[]
+}>()
 </script>
 
 <template>
@@ -26,9 +26,9 @@ defineProps<{
       <slot name="header"></slot>
     </div>
     <div v-for="(item, idx) in turns" :key="idx" class="share-item">
-      <ChatTurn 
-        :turn="item.turn" 
-        :raw-turn="item.turn" 
+      <ChatTurn
+        :turn="item.turn"
+        :raw-turn="item.turn"
         :index="item.turn.index"
         layout-mode="export"
       />
@@ -46,7 +46,8 @@ defineProps<{
   width: 800px;
   box-sizing: border-box;
   /* Ensure text rendering is identical */
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color: #212529;
 }
 
