@@ -1,363 +1,455 @@
-import { ref, type Ref } from 'vue';
-import type { FullConversationTurn, FileSystemEntry, FileEntry } from './useFileSystem';
-import { getSubDirectoryHandle, calculateHash, moveFile } from '../utils/fileSystemUtils';
+import { ref, type Ref } from 'vue'
+import type { FullConversationTurn, FileEntry } from './useFileSystem'
+import { getSubDirectoryHandle, calculateHash, fileExists } from '../utils/fileSystemUtils'
 
 // --- Reference Counting System (Module Scope Singleton) ---
-const referenceMap = ref(new Map<string, Set<string>>()); // markdownHash -> Set<jsonFileName>
-const isReferenceIndexBuilt = ref(false);
+const referenceMap = ref(new Map<string, FileSystemFileHandle[]>()) // markdownHash -> json file handles
+const isReferenceIndexBuilt = ref(false)
+
+const createConversationFileHandle = async (
+  chatsDirHandle: FileSystemDirectoryHandle,
+  timestamp: string,
+): Promise<FileSystemFileHandle> => {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const shortId = Math.random().toString(36).substring(2, 10)
+    const jsonFileName = `${timestamp}-${shortId}.json`
+    if (!(await fileExists(chatsDirHandle, jsonFileName))) {
+      return chatsDirHandle.getFileHandle(jsonFileName, { create: true })
+    }
+  }
+
+  throw new Error('无法生成唯一的对话文件名。')
+}
 
 export function useConversationIO(rootHandle: Ref<FileSystemDirectoryHandle | null>, emitter: any) {
+  const readConversation = async (
+    chatFileHandle: FileSystemFileHandle,
+  ): Promise<FullConversationTurn[]> => {
+    if (!rootHandle.value) throw new Error('无法读取对话，因为未选择根目录。')
 
-    const readConversation = async (chatFileHandle: FileSystemFileHandle): Promise<FullConversationTurn[]> => {
-        if (!rootHandle.value) throw new Error("无法读取对话，因为未选择根目录。");
+    try {
+      const jsonFile = await chatFileHandle.getFile()
+      const chatData = JSON.parse(await jsonFile.text())
+      if (!Array.isArray(chatData)) throw new Error('对话文件格式不正确，应为JSON数组。')
 
-        try {
-            const jsonFile = await chatFileHandle.getFile();
-            const chatData = JSON.parse(await jsonFile.text());
-            if (!Array.isArray(chatData)) throw new Error("对话文件格式不正确，应为JSON数组。");
+      const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', {
+        create: true,
+      })
+      return Promise.all(
+        chatData.map(async (turn: { question: string | null; answer_id: string }) => {
+          const markdownFileName = `${turn.answer_id}.md`
+          try {
+            const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName)
+            const markdownFile = await markdownFileHandle.getFile()
+            return { question: turn.question, answer: await markdownFile.text() }
+          } catch (fileError) {
+            console.error(`无法读取 Markdown 文件: ${markdownFileName}`, fileError)
+            return {
+              question: turn.question,
+              answer: `**错误：** 无法加载ID为 \`${turn.answer_id}\` 的内容。`,
+            }
+          }
+        }),
+      )
+    } catch (error) {
+      console.error(`读取对话失败: ${chatFileHandle.name}`, error)
+      throw new Error(`读取对话 "${chatFileHandle.name}" 时发生错误。`)
+    }
+  }
 
-            const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', { create: true });
-            return Promise.all(
-                chatData.map(async (turn: { question: string | null; answer_id: string }) => {
-                    const markdownFileName = `${turn.answer_id}.md`;
-                    try {
-                        const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName);
-                        const markdownFile = await markdownFileHandle.getFile();
-                        return { question: turn.question, answer: await markdownFile.text() };
-                    } catch (fileError) {
-                        console.error(`无法读取 Markdown 文件: ${markdownFileName}`, fileError);
-                        return { question: turn.question, answer: `**错误：** 无法加载ID为 \`${turn.answer_id}\` 的内容。` };
+  // --- Reference Counting System ---
+  // State moved to module scope managed above
+
+  const rebuildReferenceIndex = async () => {
+    if (!rootHandle.value) return
+    referenceMap.value.clear()
+
+    try {
+      const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats')
+
+      const scanDirectory = async (dirHandle: FileSystemDirectoryHandle) => {
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+            try {
+              const fileHandle = entry as FileSystemFileHandle
+              const file = await fileHandle.getFile()
+              const content = await file.text()
+              const data = JSON.parse(content)
+              if (Array.isArray(data)) {
+                // Collect answer_ids from this file
+                data.forEach((turn: any) => {
+                  if (turn.answer_id) {
+                    if (!referenceMap.value.has(turn.answer_id)) {
+                      referenceMap.value.set(turn.answer_id, [])
                     }
+                    referenceMap.value.get(turn.answer_id)!.push(fileHandle)
+                  }
                 })
-            );
-        } catch (error) {
-            console.error(`读取对话失败: ${chatFileHandle.name}`, error);
-            throw new Error(`读取对话 "${chatFileHandle.name}" 时发生错误。`);
-        }
-    };
-
-    // --- Reference Counting System ---
-    // State moved to module scope managed above
-
-    const rebuildReferenceIndex = async () => {
-        if (!rootHandle.value) return;
-        referenceMap.value.clear();
-        
-        try {
-            const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats');
-            console.log('Building reference index from:', chatsDirHandle.name);
-            
-            for await (const entry of chatsDirHandle.values()) {
-                if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-                    try {
-                        const file = await (entry as FileSystemFileHandle).getFile();
-                        const content = await file.text();
-                        const data = JSON.parse(content);
-                        if (Array.isArray(data)) {
-                            // Collect answer_ids from this file
-                            data.forEach((turn: any) => {
-                                if (turn.answer_id) {
-                                    if (!referenceMap.value.has(turn.answer_id)) {
-                                        referenceMap.value.set(turn.answer_id, new Set());
-                                    }
-                                    referenceMap.value.get(turn.answer_id)!.add(entry.name);
-                                }
-                            });
-                        }
-                    } catch (e) {
-                         console.warn(`Error indexing references for ${entry.name}:`, e);
-                    }
-                }
+              }
+            } catch (e) {
+              console.warn(`Error indexing references for ${entry.name}:`, e)
             }
-            isReferenceIndexBuilt.value = true;
-            console.log('Reference index built. Total tracked MD files:', referenceMap.value.size);
-        } catch (error) {
-            console.error('Failed to rebuild reference index:', error);
+          } else if (entry.kind === 'directory') {
+            await scanDirectory(entry as FileSystemDirectoryHandle)
+          }
         }
-    };
+      }
 
-    // Initialize index on mount or when root handle changes
-    // We can call this via an exposed init function or watch.
-    // Since useConversationIO is instantiated inside useFileSystem, which is global-ish scope.
-    
-    // Check if markdown is referenced (Memory check)
-    const isMarkdownReferencedInMemory = (answerId: string, excludeFileName: string): boolean => {
-       if (!isReferenceIndexBuilt.value) {
-           console.warn('Reference index not built yet, falling back to false (unsafe) or waiting? Falling back to safe-block.');
-           return true; // Safety: assume referenced if we don't know
-       }
-       
-       const refs = referenceMap.value.get(answerId);
-       if (!refs) return false;
-       
-       // Check if there are ANY files OTHER than excludeFileName
-       if (refs.size > 1) return true;
-       if (refs.size === 1 && !refs.has(excludeFileName)) return true;
-       
-       return false;
-    };
+      await scanDirectory(chatsDirHandle)
+      isReferenceIndexBuilt.value = true
+    } catch (error) {
+      console.error('Failed to rebuild reference index:', error)
+    }
+  }
 
-    // Update index helper
-    const updateReferenceIndexForFile = (filename: string, newAnswerIds: string[], oldAnswerIds: string[]) => {
-        // Remove old refs
-        oldAnswerIds.forEach(id => {
-            const fileSet = referenceMap.value.get(id);
-            if (fileSet) {
-                fileSet.delete(filename);
-                if (fileSet.size === 0) {
-                    referenceMap.value.delete(id);
-                }
-            }
-        });
-        
-        // Add new refs
-        newAnswerIds.forEach(id => {
-            if (!referenceMap.value.has(id)) {
-                referenceMap.value.set(id, new Set());
-            }
-            referenceMap.value.get(id)!.add(filename);
-        });
-    };
+  // Initialize index on mount or when root handle changes
+  // We can call this via an exposed init function or watch.
+  // Since useConversationIO is instantiated inside useFileSystem, which is global-ish scope.
 
-    const saveConversation = async (conversationTurns: { question: string | null; answer: string }[]): Promise<FileEntry | null> => {
-        if (!rootHandle.value) {
-            throw new Error('请先选择一个用于保存对话的根目录。');
+  // Check if markdown is referenced (Memory check)
+  const isMarkdownReferencedInMemory = async (
+    answerId: string,
+    excludeFileHandle: FileSystemFileHandle,
+  ): Promise<boolean> => {
+    if (!isReferenceIndexBuilt.value) {
+      console.warn(
+        'Reference index not built yet, falling back to false (unsafe) or waiting? Falling back to safe-block.',
+      )
+      return true // Safety: assume referenced if we don't know
+    }
+
+    const refs = referenceMap.value.get(answerId)
+    if (!refs) return false
+
+    for (const refHandle of refs) {
+      if (!(await refHandle.isSameEntry(excludeFileHandle))) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  // Update index helper
+  const updateReferenceIndexForFile = async (
+    fileHandle: FileSystemFileHandle,
+    newAnswerIds: string[],
+    oldAnswerIds: string[],
+  ) => {
+    // Remove old refs
+    for (const id of oldAnswerIds) {
+      const fileHandles = referenceMap.value.get(id)
+      if (!fileHandles) continue
+
+      const remainingHandles: FileSystemFileHandle[] = []
+      for (const existingHandle of fileHandles) {
+        if (!(await existingHandle.isSameEntry(fileHandle))) {
+          remainingHandles.push(existingHandle)
         }
-        try {
-            const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats', { create: true });
-            const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', { create: true });
+      }
 
-            const conversationJson = [];
-            for (const [index, turn] of conversationTurns.entries()) {
-                const contentHash = await calculateHash(turn.answer);
-                const answerId = contentHash;
-                const markdownFileName = `${answerId}.md`;
+      if (remainingHandles.length === 0) {
+        referenceMap.value.delete(id)
+      } else {
+        referenceMap.value.set(id, remainingHandles)
+      }
+    }
 
-                const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName, { create: true });
-                const writable = await markdownFileHandle.createWritable();
-                await writable.write(turn.answer);
-                await writable.close();
-                conversationJson.push({ question: turn.question, answer_id: answerId });
-            }
+    // Add new refs
+    for (const id of newAnswerIds) {
+      if (!referenceMap.value.has(id)) {
+        referenceMap.value.set(id, [])
+      }
+      referenceMap.value.get(id)!.push(fileHandle)
+    }
+  }
 
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = (date.getMonth() + 1).toString().padStart(2, '0');
-            const day = date.getDate().toString().padStart(2, '0');
-            const hours = date.getHours().toString().padStart(2, '0');
-            const minutes = date.getMinutes().toString().padStart(2, '0');
-            const timestamp = `${year}${month}${day}-${hours}${minutes}`;
+  const saveConversation = async (
+    conversationTurns: { question: string | null; answer: string }[],
+  ): Promise<FileEntry | null> => {
+    if (!rootHandle.value) {
+      throw new Error('请先选择一个用于保存对话的根目录。')
+    }
+    try {
+      const chatsDirHandle = await getSubDirectoryHandle(rootHandle.value, 'chats', {
+        create: true,
+      })
+      const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', {
+        create: true,
+      })
 
-            // Generate a shorter unique ID (8 chars) instead of full UUID
-            // timestamp provides rough ordering, this provides uniqueness collision resistance
-            const shortId = Math.random().toString(36).substring(2, 10);
-            const jsonFileName = `${timestamp}-${shortId}.json`;
-            const jsonFileHandle = await chatsDirHandle.getFileHandle(jsonFileName, { create: true });
-            const writable = await jsonFileHandle.createWritable();
-            await writable.write(JSON.stringify(conversationJson, null, 2));
-            await writable.close();
+      const conversationJson = []
+      for (const turn of conversationTurns) {
+        const contentHash = await calculateHash(turn.answer)
+        const answerId = contentHash
+        const markdownFileName = `${answerId}.md`
 
-            // Update Index
-            updateReferenceIndexForFile(jsonFileHandle.name, conversationJson.map(t => t.answer_id), []);
+        const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName, {
+          create: true,
+        })
+        const writable = await markdownFileHandle.createWritable()
+        await writable.write(turn.answer)
+        await writable.close()
+        conversationJson.push({ question: turn.question, answer_id: answerId })
+      }
 
-            emitter.$emit('file-system-changed');
-            const finalFile = await jsonFileHandle.getFile();
-            return { name: jsonFileHandle.name, kind: 'file', handle: jsonFileHandle, mtime: finalFile.lastModified };
+      const date = new Date()
+      const year = date.getFullYear()
+      const month = (date.getMonth() + 1).toString().padStart(2, '0')
+      const day = date.getDate().toString().padStart(2, '0')
+      const hours = date.getHours().toString().padStart(2, '0')
+      const minutes = date.getMinutes().toString().padStart(2, '0')
+      const timestamp = `${year}${month}${day}-${hours}${minutes}`
 
-        } catch (error) {
-            console.error('保存对话时出错:', error);
-            throw error;
-        }
-    };
+      const jsonFileHandle = await createConversationFileHandle(chatsDirHandle, timestamp)
+      const writable = await jsonFileHandle.createWritable()
+      await writable.write(JSON.stringify(conversationJson, null, 2))
+      await writable.close()
 
-    const deleteConversation = async (chatFileHandle: FileSystemFileHandle, parentDirHandle: FileSystemDirectoryHandle) => {
-        if (!rootHandle.value) throw new Error("无法删除对话，因为未选择根目录。");
+      // Update Index
+      await updateReferenceIndexForFile(
+        jsonFileHandle,
+        conversationJson.map((t) => t.answer_id),
+        [],
+      )
 
-        try {
-            const jsonFile = await chatFileHandle.getFile();
-            const chatData = JSON.parse(await jsonFile.text());
+      emitter.$emit('file-system-changed')
+      const finalFile = await jsonFileHandle.getFile()
+      return {
+        name: jsonFileHandle.name,
+        kind: 'file',
+        handle: jsonFileHandle,
+        mtime: finalFile.lastModified,
+      }
+    } catch (error) {
+      console.error('保存对话时出错:', error)
+      throw error
+    }
+  }
 
-            const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown');
-            if (markdownDirHandle && Array.isArray(chatData)) {
-                // Ensure index is ready (if not, maybe just skip deletion of MD or rebuild)
-                if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex();
+  const deleteConversation = async (
+    chatFileHandle: FileSystemFileHandle,
+    parentDirHandle: FileSystemDirectoryHandle,
+  ) => {
+    if (!rootHandle.value) throw new Error('无法删除对话，因为未选择根目录。')
 
-                for (const turn of chatData) {
-                    try {
-                        // Check if referenced by others (Memory)
-                        if (isMarkdownReferencedInMemory(turn.answer_id, chatFileHandle.name)) {
-                            console.log(`Skipping deletion of referenced markdown: ${turn.answer_id}.md`);
-                            continue;
-                        }
-                        
-                        await markdownDirHandle.removeEntry(`${turn.answer_id}.md`);
-                    } catch (e) {
-                         // Ignore if file doesn't exist
-                    }
-                }
-                
-                // Update Index: Remove all refs for this file
-                updateReferenceIndexForFile(chatFileHandle.name, [], chatData.map((t: any) => t.answer_id));
-            }
-            await parentDirHandle.removeEntry(chatFileHandle.name);
-            emitter.$emit('file-system-changed');
-        } catch (error) {
-            console.error(`删除对话失败: ${chatFileHandle.name}`, error);
-            throw new Error(`删除对话 "${chatFileHandle.name}" 时发生错误。`);
-        }
-    };
+    try {
+      const jsonFile = await chatFileHandle.getFile()
+      const chatData = JSON.parse(await jsonFile.text())
 
-    const renameConversation = async (fileHandle: FileSystemFileHandle, newName: string, parentDirHandle: FileSystemDirectoryHandle) => {
-        if (!rootHandle.value) throw new Error("无法重命名，因为未选择根目录。");
+      const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown')
+      if (markdownDirHandle && Array.isArray(chatData)) {
+        // Ensure index is ready (if not, maybe just skip deletion of MD or rebuild)
+        if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex()
 
-        let finalNewName = newName.trim();
-        if (!finalNewName) throw new Error("新名称不能为空。");
-        if (!finalNewName.endsWith('.json')) {
-            finalNewName += '.json';
-        }
-
-        if (finalNewName === fileHandle.name) return;
-
-        try {
-            const oldFile = await fileHandle.getFile();
-            const content = await oldFile.text();
-
-            const newFileHandle = await parentDirHandle.getFileHandle(finalNewName, { create: true });
-            const writable = await newFileHandle.createWritable();
-            await writable.write(content);
-            await writable.close();
-
-            await parentDirHandle.removeEntry(fileHandle.name);
-            emitter.$emit('file-system-changed');
-        } catch (error) {
-            console.error(`重命名失败: ${fileHandle.name}`, error);
-            throw new Error(`重命名 "${fileHandle.name}" 为 "${finalNewName}" 时发生错误。`);
-        }
-    };
-
-    const updateConversation = async (chatFileHandle: FileSystemFileHandle, updatedTurns: { question: string | null; answer: string }[]) => {
-        if (!rootHandle.value) {
-            throw new Error("无法更新对话，因为未选择根目录。");
-        }
-
-        try {
-            const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', { create: true });
-
-            // 1. Read original file to get old answer_ids
-            const originalFile = await chatFileHandle.getFile();
-            const originalData = JSON.parse(await originalFile.text());
-            const oldAnswerIds = new Set<string>(originalData.map((turn: { answer_id: string }) => turn.answer_id));
-
-            const newConversationJson = [];
-            const newAnswerIds = new Set<string>();
-
-            // 2. Process updated turns: create new markdown files and build new JSON
-            for (const [index, turn] of updatedTurns.entries()) {
-                const contentHash = await calculateHash(turn.answer);
-                const answerId = contentHash;
-                const markdownFileName = `${answerId}.md`;
-
-                // Write the new markdown file
-                const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName, { create: true });
-                const writable = await markdownFileHandle.createWritable();
-                await writable.write(turn.answer);
-                await writable.close();
-
-                newConversationJson.push({ question: turn.question, answer_id: answerId });
-                newAnswerIds.add(answerId);
+        for (const turn of chatData) {
+          try {
+            // Check if referenced by others (Memory)
+            if (await isMarkdownReferencedInMemory(turn.answer_id, chatFileHandle)) {
+              continue
             }
 
-            // 3. Delete old markdown files that are no longer referenced
-            if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex();
-            
-            for (const oldId of oldAnswerIds) {
-                if (!newAnswerIds.has(oldId)) {
-                    try {
-                        // Check if referenced by others (Memory)
-                        // Note: At this point, updateReferenceIndexForFile hasn't run yet for THIS file changes.
-                        // So the referenceMap still thinks this file references oldId.
-                        // We need to account for that.
-                        // Actually, checkRefs logic: `refs.size === 1 && !refs.has(excludeFileName)`.
-                        // If we pass `chatFileHandle.name` as exclude, it ignores the *current* file's old reference.
-                        // Checks if *anyone else* references it.
-                        // This logic holds up.
-                        
-                        if (isMarkdownReferencedInMemory(oldId, chatFileHandle.name)) {
-                             console.log(`Skipping deletion of referenced markdown: ${oldId}.md`);
-                             continue;
-                        }
-
-                        await markdownDirHandle.removeEntry(`${oldId}.md`);
-                        console.log(`Deleted stale markdown file: ${oldId}.md`);
-                    } catch (e) {
-                         // Ignore error
-                    }
-                }
-            }
-
-            // 4. Overwrite the main JSON file
-            const writable = await chatFileHandle.createWritable();
-            await writable.write(JSON.stringify(newConversationJson, null, 2));
-            await writable.close();
-
-            // Update Index
-            updateReferenceIndexForFile(
-                chatFileHandle.name, 
-                newConversationJson.map(t => t.answer_id), 
-                Array.from(oldAnswerIds)
-            );
-
-            emitter.$emit('file-system-changed'); // Notify UI to refresh if needed
-
-        } catch (error) {
-            console.error(`更新对话失败: ${chatFileHandle.name}`, error);
-            throw new Error(`更新对话 "${chatFileHandle.name}" 时发生错误。`);
+            await markdownDirHandle.removeEntry(`${turn.answer_id}.md`)
+          } catch (e) {
+            // Ignore if file doesn't exist
+          }
         }
-    };
 
-    const mergeConversations = async (targetHandle: FileSystemFileHandle, sources: { handle: FileSystemFileHandle, parentHandle: FileSystemDirectoryHandle }[]) => {
-        if (!rootHandle.value) throw new Error("无法合并，因为未选择根目录。");
+        // Update Index: Remove all refs for this file
+        await updateReferenceIndexForFile(
+          chatFileHandle,
+          [],
+          chatData.map((t: any) => t.answer_id),
+        )
+      }
+      await parentDirHandle.removeEntry(chatFileHandle.name)
+      emitter.$emit('file-system-changed')
+    } catch (error) {
+      console.error(`删除对话失败: ${chatFileHandle.name}`, error)
+      throw new Error(`删除对话 "${chatFileHandle.name}" 时发生错误。`)
+    }
+  }
 
-        try {
-            // 1. Read the target conversation
-            const targetFile = await targetHandle.getFile();
-            let targetData = JSON.parse(await targetFile.text());
-            if (!Array.isArray(targetData)) targetData = [];
+  const renameConversation = async (
+    fileHandle: FileSystemFileHandle,
+    newName: string,
+    parentDirHandle: FileSystemDirectoryHandle,
+  ) => {
+    if (!rootHandle.value) throw new Error('无法重命名，因为未选择根目录。')
 
-            // 2. Read and append source conversations
-            for (const source of sources) {
-                const sourceFile = await source.handle.getFile();
-                const sourceData = JSON.parse(await sourceFile.text());
-                if (Array.isArray(sourceData)) {
-                    targetData = targetData.concat(sourceData);
-                }
+    let finalNewName = newName.trim()
+    if (!finalNewName) throw new Error('新名称不能为空。')
+    if (!finalNewName.endsWith('.json')) {
+      finalNewName += '.json'
+    }
+
+    if (finalNewName === fileHandle.name) return
+
+    try {
+      if (await fileExists(parentDirHandle, finalNewName)) {
+        throw new Error(`目标文件 "${finalNewName}" 已存在。`)
+      }
+
+      const oldFile = await fileHandle.getFile()
+      const content = await oldFile.text()
+      const oldData = JSON.parse(content)
+      const oldAnswerIds = Array.isArray(oldData)
+        ? oldData.map((turn: any) => turn.answer_id).filter(Boolean)
+        : []
+
+      const newFileHandle = await parentDirHandle.getFileHandle(finalNewName, { create: true })
+      const writable = await newFileHandle.createWritable()
+      await writable.write(content)
+      await writable.close()
+
+      await parentDirHandle.removeEntry(fileHandle.name)
+      if (isReferenceIndexBuilt.value) {
+        await updateReferenceIndexForFile(fileHandle, [], oldAnswerIds)
+        await updateReferenceIndexForFile(newFileHandle, oldAnswerIds, [])
+      }
+      emitter.$emit('file-system-changed')
+    } catch (error) {
+      console.error(`重命名失败: ${fileHandle.name}`, error)
+      throw error instanceof Error
+        ? error
+        : new Error(`重命名 "${fileHandle.name}" 为 "${finalNewName}" 时发生错误。`)
+    }
+  }
+
+  const updateConversation = async (
+    chatFileHandle: FileSystemFileHandle,
+    updatedTurns: { question: string | null; answer: string }[],
+  ) => {
+    if (!rootHandle.value) {
+      throw new Error('无法更新对话，因为未选择根目录。')
+    }
+
+    try {
+      const markdownDirHandle = await getSubDirectoryHandle(rootHandle.value, 'markdown', {
+        create: true,
+      })
+
+      // 1. Read original file to get old answer_ids
+      const originalFile = await chatFileHandle.getFile()
+      const originalData = JSON.parse(await originalFile.text())
+      const oldAnswerIds = new Set<string>(
+        originalData.map((turn: { answer_id: string }) => turn.answer_id),
+      )
+
+      const newConversationJson = []
+      const newAnswerIds = new Set<string>()
+
+      // 2. Process updated turns: create new markdown files and build new JSON
+      for (const turn of updatedTurns) {
+        const contentHash = await calculateHash(turn.answer)
+        const answerId = contentHash
+        const markdownFileName = `${answerId}.md`
+
+        // Write the new markdown file
+        const markdownFileHandle = await markdownDirHandle.getFileHandle(markdownFileName, {
+          create: true,
+        })
+        const writable = await markdownFileHandle.createWritable()
+        await writable.write(turn.answer)
+        await writable.close()
+
+        newConversationJson.push({ question: turn.question, answer_id: answerId })
+        newAnswerIds.add(answerId)
+      }
+
+      // 3. Delete old markdown files that are no longer referenced
+      if (!isReferenceIndexBuilt.value) await rebuildReferenceIndex()
+
+      for (const oldId of oldAnswerIds) {
+        if (!newAnswerIds.has(oldId)) {
+          try {
+            // Check if referenced by others (Memory)
+            // Note: At this point, updateReferenceIndexForFile hasn't run yet for THIS file changes.
+            // So the referenceMap still thinks this file references oldId.
+            // We need to account for that.
+            // Actually, checkRefs logic: `refs.size === 1 && !refs.has(excludeFileName)`.
+            // If we pass `chatFileHandle.name` as exclude, it ignores the *current* file's old reference.
+            // Checks if *anyone else* references it.
+            // This logic holds up.
+
+            if (await isMarkdownReferencedInMemory(oldId, chatFileHandle)) {
+              continue
             }
 
-            // 3. Save the merged conversation back to the target file
-            const writable = await targetHandle.createWritable();
-            await writable.write(JSON.stringify(targetData, null, 2));
-            await writable.close();
-
-            // 4. Delete source files
-            for (const source of sources) {
-                 await source.parentHandle.removeEntry(source.handle.name);
-            }
-
-            emitter.$emit('file-system-changed'); 
-        } catch (error) {
-            console.error('合并对话失败:', error);
-            throw new Error('合并对话时发生错误。');
+            await markdownDirHandle.removeEntry(`${oldId}.md`)
+          } catch (e) {
+            // Ignore error
+          }
         }
-    };
+      }
 
-    return {
-        readConversation,
-        saveConversation,
-        deleteConversation,
-        renameConversation,
-        rebuildReferenceIndex, // Expose for initialization
-        updateConversation,
-        mergeConversations
-    };
+      // 4. Overwrite the main JSON file
+      const writable = await chatFileHandle.createWritable()
+      await writable.write(JSON.stringify(newConversationJson, null, 2))
+      await writable.close()
 
+      // Update Index
+      await updateReferenceIndexForFile(
+        chatFileHandle,
+        newConversationJson.map((t) => t.answer_id),
+        Array.from(oldAnswerIds),
+      )
+
+      emitter.$emit('file-system-changed') // Notify UI to refresh if needed
+    } catch (error) {
+      console.error(`更新对话失败: ${chatFileHandle.name}`, error)
+      throw new Error(`更新对话 "${chatFileHandle.name}" 时发生错误。`)
+    }
+  }
+
+  const mergeConversations = async (
+    targetHandle: FileSystemFileHandle,
+    sources: { handle: FileSystemFileHandle; parentHandle: FileSystemDirectoryHandle }[],
+  ) => {
+    if (!rootHandle.value) throw new Error('无法合并，因为未选择根目录。')
+
+    try {
+      // 1. Read the target conversation
+      const targetFile = await targetHandle.getFile()
+      let targetData = JSON.parse(await targetFile.text())
+      if (!Array.isArray(targetData)) targetData = []
+
+      // 2. Read and append source conversations
+      for (const source of sources) {
+        const sourceFile = await source.handle.getFile()
+        const sourceData = JSON.parse(await sourceFile.text())
+        if (Array.isArray(sourceData)) {
+          targetData = targetData.concat(sourceData)
+        }
+      }
+
+      // 3. Save the merged conversation back to the target file
+      const writable = await targetHandle.createWritable()
+      await writable.write(JSON.stringify(targetData, null, 2))
+      await writable.close()
+
+      // 4. Delete source files
+      for (const source of sources) {
+        await source.parentHandle.removeEntry(source.handle.name)
+      }
+
+      if (isReferenceIndexBuilt.value) {
+        await rebuildReferenceIndex()
+      }
+      emitter.$emit('file-system-changed')
+    } catch (error) {
+      console.error('合并对话失败:', error)
+      throw new Error('合并对话时发生错误。')
+    }
+  }
+
+  return {
+    readConversation,
+    saveConversation,
+    deleteConversation,
+    renameConversation,
+    rebuildReferenceIndex, // Expose for initialization
+    updateConversation,
+    mergeConversations,
+  }
 }

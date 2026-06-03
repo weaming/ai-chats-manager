@@ -1,6 +1,6 @@
 import { marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
-import hljs from 'highlight.js'
+import hljs from 'highlight.js/lib/common'
 
 export function setupMarkdownRenderer() {
   marked.use(
