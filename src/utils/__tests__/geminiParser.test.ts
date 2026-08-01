@@ -70,4 +70,66 @@ message time: 2026-06-03 18:57:18
       },
     ])
   })
+
+  test('回答正文中含 AI 等关键词的子标题不被误判为分隔符', () => {
+    const markdown = `> From: https://gemini.google.com/app/example
+
+# you asked
+
+message time: 2026-08-01 17:25:31
+
+这数据的职位，我适合哪些
+
+---
+
+# gemini response
+
+针对岗位数据分析如下：
+
+### 1. Agent Harness 团队
+
+内容 A
+
+---
+
+### 2. AI 产品经理 (AI 产品方向)
+
+内容 B
+
+---
+
+# you asked
+
+message time: 2026-08-01 17:39:46
+
+整体分析职位描述
+
+---
+
+# gemini response
+
+## 一、内部组织架构
+
+### 2. AI 核心系统部 (AI Systems & Infra)
+
+核心职责说明。
+
+---
+Powered by [AI Exporter](https://saveai.net)
+`
+
+    const turns = parseGeminiContent(markdown)
+
+    expect(turns).toEqual([
+      {
+        question: '这数据的职位，我适合哪些',
+        answer:
+          '针对岗位数据分析如下：\n\n### 1. Agent Harness 团队\n\n内容 A\n\n---\n\n### 2. AI 产品经理 (AI 产品方向)\n\n内容 B',
+      },
+      {
+        question: '整体分析职位描述',
+        answer: '## 一、内部组织架构\n\n### 2. AI 核心系统部 (AI Systems & Infra)\n\n核心职责说明。',
+      },
+    ])
+  })
 })

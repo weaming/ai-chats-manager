@@ -3,7 +3,9 @@ import type { FullConversationTurn } from '../composables/useFileSystem'
 type MarkdownSectionRole = 'question' | 'answer' | null
 
 // 预编译正则表达式以提高性能
-const HEADING_PATTERN = /^#+/
+// 仅一级标题（单个 #）才可能是 you asked / gemini response 这类角色分隔符，
+// 回答正文里的 ##/### 子标题（如 "### AI 产品经理"）即使含关键词也应保留为正文
+const TOP_LEVEL_HEADING_PATTERN = /^#(?!#)/
 const QUESTION_HEADING_PATTERN = /\b(you\s+asked|user|question|prompt|asked)\b|提问|问题/i
 const ANSWER_HEADING_PATTERN = /\b(ai|assistant|answer|response|responded)\b|回答|助手/i
 const METADATA_PATTERN = /^(message\s+time|from|time|date|sent|created\s+at|消息时间|发送时间)\s*:/i
@@ -79,11 +81,11 @@ function parseGeminiMarkdown(text: string): FullConversationTurn[] {
 }
 
 function getHeadingRole(line: string): MarkdownSectionRole {
-  if (!HEADING_PATTERN.test(line)) {
+  if (!TOP_LEVEL_HEADING_PATTERN.test(line)) {
     return null
   }
 
-  const heading = line.replace(/^#+\s*/, '').trim()
+  const heading = line.replace(/^#\s*/, '').trim()
 
   if (QUESTION_HEADING_PATTERN.test(heading)) {
     return 'question'
